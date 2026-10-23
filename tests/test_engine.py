@@ -213,6 +213,15 @@ class EngineTests(unittest.TestCase):
         text = self.path.read_text()
         self.assertIn("#  Where head angles come from", text)
 
+    def test_save_after_live_preview_writes_file(self):
+        e = self.start()
+        new = dataclasses.replace(e.settings, up=dataclasses.replace(e.settings.up, max_speed=90.0))
+        e.apply_settings(new, save=False)                       # slider preview
+        self.assertTrue(wait_for(lambda: e.snapshot().settings.up.max_speed == 90.0))
+        self.assertEqual(config.load(self.path)[0].up.max_speed, 60.0)
+        e.apply_settings(new, save=True)                        # then Save
+        self.assertTrue(wait_for(lambda: config.load(self.path)[0].up.max_speed == 90.0))
+
     def test_webcam_smoothing_change_does_not_restart_camera(self):
         e = self.start()
         new = dataclasses.replace(e.settings, webcam=dataclasses.replace(e.settings.webcam,

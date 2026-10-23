@@ -4,7 +4,7 @@ cd /d "%~dp0"
 call tools\find_python.bat || goto :error
 py -%PYV% -m pip install --upgrade pyinstaller -r requirements.txt || goto :error
 py -%PYV% tools\get_face_model.py || goto :error
-py -%PYV% -m PyInstaller --noconfirm --onedir --windowed --name HeadMouse --collect-all mediapipe --add-data "face_landmarker.task;." run_headmouse.pyw || goto :error
+py -%PYV% -m PyInstaller --noconfirm --onedir --windowed --name HeadMouse --collect-all mediapipe --collect-data customtkinter --add-data "face_landmarker.task;." run_headmouse.pyw || goto :error
 if not exist dist\HeadMouse\headmouse_settings.toml copy headmouse_settings.toml dist\HeadMouse\ >nul
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\make_shortcut.ps1 -Exe "%~dp0dist\HeadMouse\HeadMouse.exe"
 echo.

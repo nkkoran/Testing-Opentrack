@@ -165,6 +165,8 @@ auto_enable_in_game = true
 only_move_in_game_window = false
 # Keep the HeadMouse window on top of other windows.
 always_on_top = false
+# Window colours: "system" (follow Windows), "light" or "dark".
+theme = "system"
 # Show the live status line (console mode).
 show_status = true
 # Set by the setup wizard. false = the wizard opens when HeadMouse starts.

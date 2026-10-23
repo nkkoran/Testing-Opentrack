@@ -375,7 +375,13 @@ class Engine:
     def _apply(self, new, save):
         old = self.settings
         if save:
-            changes = config.diff(old, new)
+            # Compare with the file, not the running settings: values tried live
+            # (save=False) are already running but not yet written.
+            try:
+                on_disk = config.load(self.path)[0]
+            except config.SettingsError:
+                on_disk = old
+            changes = config.diff(on_disk, new)
             if changes:
                 try:
                     config.save_values(self.path, changes)

@@ -49,3 +49,30 @@ def key_code(name):
     if text not in _NAMED_KEYS:
         raise ValueError(f"unknown key name {name!r}")
     return _NAMED_KEYS[text]
+
+
+_TK_KEYSYMS = {
+    "Pause": "PAUSE", "Scroll_Lock": "SCROLLLOCK", "Caps_Lock": "CAPSLOCK", "Num_Lock": "NUMLOCK",
+    "Insert": "INSERT", "Delete": "DELETE", "Home": "HOME", "End": "END",
+    "Prior": "PAGEUP", "Next": "PAGEDOWN", "Left": "LEFT", "Right": "RIGHT", "Up": "UP", "Down": "DOWN",
+    "space": "SPACE", "Tab": "TAB", "Return": "ENTER", "BackSpace": "BACKSPACE",
+    "Shift_L": "LSHIFT", "Shift_R": "RSHIFT", "Control_L": "LCTRL", "Control_R": "RCTRL",
+    "Alt_L": "LALT", "Alt_R": "RALT", "grave": "BACKTICK", "minus": "MINUS", "equal": "EQUALS",
+    "bracketleft": "LEFTBRACKET", "bracketright": "RIGHTBRACKET", "semicolon": "SEMICOLON",
+    "apostrophe": "QUOTE", "comma": "COMMA", "period": "PERIOD", "slash": "SLASH", "backslash": "BACKSLASH",
+    "KP_Multiply": "NUMPADMULTIPLY", "KP_Add": "NUMPADADD", "KP_Subtract": "NUMPADSUBTRACT",
+    "KP_Decimal": "NUMPADDECIMAL", "KP_Divide": "NUMPADDIVIDE",
+}
+for _i in range(10):
+    _TK_KEYSYMS[f"KP_{_i}"] = f"NUMPAD{_i}"
+
+
+def name_from_tk_keysym(keysym):
+    """Settings-file key name for a Tk key event's keysym, or None if unsupported."""
+    if keysym in _TK_KEYSYMS:
+        return _TK_KEYSYMS[keysym]
+    upper = keysym.upper()
+    if (len(upper) == 1 and upper.isalnum()) or (upper.startswith("F") and upper[1:].isdigit()
+                                                 and 1 <= int(upper[1:]) <= 24):
+        return upper
+    return None

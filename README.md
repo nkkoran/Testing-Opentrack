@@ -55,16 +55,16 @@ from the main window.
 
 ## 3. Test it, then calibrate for the game
 
-**Desktop test:** press **Turn ON** (or F10). The cursor glides while your head is turned and stops
+**Desktop test:** flip the **Head control** switch (or press F10). The cursor glides while your head is turned and stops
 when centered. Hold **F9**: it freezes. Cover the camera: within a second the window turns red
 (**NO TRACKING**) and you hear a low double tone.
 
 **Game calibration:** this makes the speeds real in-game degrees per second.
 1. Start Enshrouded and set its mouse sensitivity the way you like it.
-2. In HeadMouse click **Game calibration**, then **Test turn in 5 seconds**, and click into the game.
-   You can also press **F6** while in the game, as long as the calibration window is open.
+2. In HeadMouse open **Settings → Game**, press **Test turn in 5 seconds**, and click into the game.
+   You can also press **F6** in the game while that tab is open.
 3. The camera should turn exactly one full circle. If not, type how far it actually turned (e.g.
-   400) and click **Correct it**. Repeat until it's right.
+   400), press **Fix it**, then **Save**. Repeat until it's right.
 
 ## 4. Everyday use (for your father)
 
@@ -76,19 +76,26 @@ when centered. Hold **F9**: it freezes. Cover the camera: within a second the wi
 **Sounds:** rising tone = on, falling tone = off, low double tone = tracking lost (movement
 stopped), short high tone = tracking back.
 
-**The window:**
+**The main window:**
 
 | Part | Meaning |
 |---|---|
-| Big coloured bar | Green **ACTIVE**, yellow **PAUSED**, grey **OFF**, red **NO TRACKING** |
-| Box with the dot | Where your head is. Green box = dead zone, dashed box = full speed |
-| Turn ON / OFF | Same as F10 |
+| Big coloured card | Green **On**, amber **Frozen**, grey **Off**, red **Can't see your face** / **No tracking**, with a one-line hint underneath |
+| Head control switch | Same as F10 |
+| Head view | The dot is your head. Green box = dead zone, dashed box = full speed; the arrows light up in the direction the camera is turning |
 | Re-center | Look straight at the screen and press it (or F8) |
-| Setup wizard | Re-measure your comfortable head range |
-| Sensitivity | Sliders for each direction, with a live graph |
-| Game calibration | Match speeds to the game (section 3) |
-| Tracker / OpenTrack | Choose webcam or OpenTrack; set up an OpenTrack profile |
-| Keep on top | Keeps the window visible above the game (borderless/windowed mode) |
+| Settings | Everything else (below) |
+| Camera / Stay on top | Small switches at the bottom: a floating camera preview, and keeping HeadMouse above the game |
+
+**Settings** has four tabs. Changes are tried out immediately; **Save** keeps them and **Undo
+changes** goes back.
+- **Feel:** pick a direction (Right, Left, Up, Down) and adjust it while watching the graph.
+- **Tracking:** webcam or OpenTrack, camera choice, steadiness, the setup wizard, and the OpenTrack
+  profile helper.
+- **Game:** calibration for the game, and auto-on in the game window. Head control is paused while
+  this tab is open.
+- **Keys & sound:** click a key slot and press the new key (or tap the foot pedal). Also sound volume
+  and Light/Dark/System appearance.
 
 ## 5. Keys
 
@@ -98,36 +105,35 @@ stopped), short high tone = tracking back.
 | **F9** (hold) | Freeze camera immediately; release to resume. Overrides everything |
 | **F7** (hold) | Precision mode: 80% slower, for aiming |
 | **F8** | Re-center (look straight at the screen first) |
-| **F6** | Test turn (only while the Game calibration window is open) |
+| **F6** | Test turn (only while **Settings → Game** is open) |
 
-Change them under **Sensitivity → Other**. Keys are only *watched*, never blocked, so the game
+Change them under **Settings → Keys & sound**: click a key slot, then press the key you want
+(or tap the foot pedal). Keys are only *watched*, never blocked, so the game
 also receives them. Choose keys the game doesn't use. A foot pedal programmed to send F9 works
 exactly like F9.
 
 ## 6. Adjusting the feel
 
-Open **Sensitivity**. Each tab (Right, Left, Up, Down) has five sliders, and the graph shows the
-result, with a red dot where your head is right now. Changes apply immediately so you can try them.
-**Save** keeps them; **Cancel changes** goes back.
+Open **Settings → Feel** and choose a direction. The graph shows camera speed against head angle,
+with a red dot where your head is right now.
 
 | Slider | Effect |
 |---|---|
-| Dead zone | Head angle with no movement |
-| Head angle for full speed | Smaller = less head movement needed |
-| Slowest speed | Speed just outside the dead zone |
+| Head turn for full speed | Smaller = less head movement needed |
 | Top speed | Fastest turning |
-| Curve | 1 = even; higher = finer control near center, faster further out |
+| Dead zone | How far you can move before the camera starts turning |
+| Slowest speed *(advanced)* | Speed just outside the dead zone |
+| Curve *(advanced)* | 1 = even; higher = finer control near center, faster further out |
 
-Use "Copy these settings to …" to make two directions match. The **Other** tab has precision
-speed, webcam steadiness (lower = steadier, higher = quicker), sound volume, reverse up/down,
-auto-on in the game, and the keys.
+"Copy these to …" makes the opposite direction match. **Precision aim speed** sets how slow
+precision mode is.
 
 Everything is stored in `headmouse_settings.toml` (with explanations). It can also be edited in
 Notepad, and changes apply within a second.
 
 ## 7. Using OpenTrack instead of the webcam tracker
 
-In **Tracker / OpenTrack**:
+In **Settings → Tracking**:
 1. Select **OpenTrack**.
 2. Click **Create HeadMouse profile**. This makes a *copy* of your OpenTrack profile, keeping your
    camera and tracker settings, with the output set to HeadMouse (UDP 127.0.0.1:4242) and the
@@ -154,17 +160,17 @@ rested in the dead zone for 0.15 s.
 | Problem | Fix |
 |---|---|
 | "Webcam support is not installed" | Run `Setup.bat` again and watch for errors in step 1. |
-| "Camera 0 not found or busy" | Close OpenTrack, Zoom, Teams, etc. Wrong camera? Change the number in **Tracker / OpenTrack**. |
+| "Camera 0 not found or busy" | Close OpenTrack, Zoom, Teams, etc. Wrong camera? Choose another in **Settings → Tracking**. |
 | "Looking for your face" stays red | Face the camera, put light on your face (not behind you), and move closer. |
-| Movement is jittery | **Sensitivity → Other → Webcam steadiness**: lower it. Or raise the dead zone. |
-| Movement feels laggy | Raise webcam steadiness a little. |
+| Movement is jittery | **Settings → Tracking → Steadiness**: move it left. Or raise the dead zone. |
+| Movement feels laggy | Move Steadiness a little to the right. |
 | Turns the wrong way | Run the **Setup wizard**; it fixes directions automatically. |
 | Drifts with head centered | Press **Re-center** (F8) while looking straight at the screen. |
 | Doesn't turn on in the game | The game's window title must contain "Enshrouded" (`game_window_title` in the settings file). Or just press F10. |
 | Shows ACTIVE but the game camera doesn't move | If Enshrouded runs as administrator, Windows silently blocks input from normal programs. Run HeadMouse as administrator too (right-click → Run as administrator). |
 | "Webcam support could not load" / Setup step 3 fails | Install the Microsoft Visual C++ Redistributable (<https://aka.ms/vs/17/release/vc_redist.x64.exe>), then run `Setup.bat` again. |
-| Speeds feel wrong in game | Redo **Game calibration** after changing the game's mouse sensitivity. |
-| F9/F10 also do something in the game | Pick other keys under **Sensitivity → Other** (e.g. `PAUSE`, `SCROLLLOCK`). |
+| Speeds feel wrong in game | Redo the calibration in **Settings → Game** after changing the game's mouse sensitivity. |
+| F9/F10 also do something in the game | Pick other keys under **Settings → Keys & sound** (e.g. Pause or Scroll Lock). |
 | HeadMouse closed with an error | See `headmouse_error.log` in the HeadMouse folder. |
 | Windows Firewall asks about Python | Only needed for OpenTrack mode (local only). Allowing *Private networks* is enough. |
 
@@ -184,7 +190,7 @@ headmouse/curves.py           head angle -> camera speed for one direction
 headmouse/controller.py       joystick logic: dead zones, no-reverse rule, pause, fractions -> counts
 headmouse/engine.py           the loop on a background thread; keys, sounds, auto-on, test turn
 headmouse/calibration.py      setup-wizard maths
-headmouse/gui.py              the Tkinter window and its dialogs
+headmouse/gui.py              the window (CustomTkinter): main screen, Settings, setup wizard
 headmouse/opentrack_setup.py  OpenTrack profile copy/patch and launching
 headmouse/winput.py           Windows SendInput / GetAsyncKeyState
 headmouse/sounds.py           generated tone cues (winsound)

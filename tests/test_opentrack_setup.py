@@ -44,7 +44,7 @@ class ProfileTests(unittest.TestCase):
             (folder / "default.ini").write_text(SAMPLE, newline="")
             dest, backup = make_headmouse_profile(folder, "default.ini")
             self.assertIsNone(backup)
-            self.assertEqual((folder / "default.ini").read_text(newline=""), SAMPLE)
+            self.assertEqual((folder / "default.ini").read_bytes(), SAMPLE.encode())
             dest, backup = make_headmouse_profile(folder, "default.ini", port=5000)
             self.assertTrue(backup.exists())
             self.assertEqual(parse(dest.read_text())["udp-proto"]["port"], "5000")

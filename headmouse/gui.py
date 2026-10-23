@@ -1,5 +1,5 @@
-"""The HeadMouse window: big status light, head-position view and large buttons,
-plus the setup wizard, sensitivity sliders, game calibration and tracker setup.
+"""The HeadMouse window (CustomTkinter): a large status card, one on/off switch,
+a live head-position view and big buttons, plus Settings and the setup wizard.
 
 Everything here talks to the Engine, which does the real work on its own thread.
 """
@@ -9,136 +9,332 @@ import dataclasses
 import sys
 import time
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import messagebox
+
+import customtkinter as ctk
 
 from . import calibration, config, opentrack_setup
 from .curves import DirectionCurve
 from .engine import Engine
-from .keys import key_code
+from .keys import name_from_tk_keysym
 from .safety import TrackingStatus
 
-FONT = "Segoe UI" if sys.platform == "win32" else "DejaVu Sans"
-COLORS = {"ACTIVE": "#2e7d32", "PAUSED": "#e0a000", "OFF": "#616161", "STOPPED": "#c62828",
-          "BUSY": "#1565c0", "WAITING": "#5c6bc0", "CENTER": "#5c6bc0", "STARTING": "#616161"}
-DIRECTION_NAMES = ("right", "left", "up", "down")
+FAMILY = "Segoe UI" if sys.platform == "win32" else "DejaVu Sans"
+
+# (light, dark) colour pairs
+BG = ("#f1f3f6", "#111317")
+CARD = ("#ffffff", "#1c1f25")
+BORDER = ("#e3e6eb", "#2b3039")
+TEXT = ("#111827", "#f3f4f6")
+MUTED = ("#6b7280", "#9aa3af")
+ACCENT = ("#2563eb", "#3b82f6")
+ACCENT_HOVER = ("#1d4ed8", "#2563eb")
+SUBTLE = ("#eef1f5", "#262a32")
+SUBTLE_HOVER = ("#e2e6ec", "#30353f")
+ZONE = ("#dcfce7", "#14321f")
+ZONE_LINE = ("#86efac", "#2f7a48")
+DANGER = ("#dc2626", "#ef4444")
+TRACK = ("#dde2e9", "#30353f")      # unfilled slider / progress / switch track
+PILL = ("#ffffff", "#3b424e")       # selected option in a segmented control
+KNOB = ("#e9ecf1", "#e5e7eb")
+SWITCH_OFF = ("#c5ccd6", "#434a56")
+STATE_COLORS = {
+    "ACTIVE": ("#16a34a", "#15803d"), "PAUSED": ("#d97706", "#b45309"), "OFF": ("#64748b", "#3f4a5a"),
+    "STOPPED": ("#dc2626", "#b91c1c"), "BUSY": ("#2563eb", "#1d4ed8"), "WAITING": ("#7c3aed", "#6d28d9"),
+    "CENTER": ("#7c3aed", "#6d28d9"), "STARTING": ("#64748b", "#3f4a5a"),
+}
+DIRECTIONS = ("right", "left", "up", "down")
+PAIRS = {"right": "left", "left": "right", "up": "down", "down": "up"}
 
 
-def _font(size, bold=False):
-    return (FONT, size, "bold") if bold else (FONT, size)
+def pick(pair):
+    """The light or dark colour of a pair, for plain Tk widgets like the canvas."""
+    return pair[1] if ctk.get_appearance_mode() == "Dark" else pair[0]
 
 
-def _replace(settings, section, **changes):
-    return dataclasses.replace(settings, **{section: dataclasses.replace(getattr(settings, section), **changes)})
+def font(size, weight="normal"):
+    return ctk.CTkFont(family=FAMILY, size=size, weight=weight)
 
 
-def _big_button(parent, text, command, **kw):
-    return tk.Button(parent, text=text, command=command, font=_font(13, True), height=2,
-                     relief="raised", bd=2, **kw)
+def overlay(base, changes):
+    """Apply {section: {key: value}} on top of a Settings object."""
+    for section, values in changes.items():
+        base = dataclasses.replace(base, **{section: dataclasses.replace(getattr(base, section), **values)})
+    return base
 
 
-def _png_photo(data):
+def replace(settings, section, **values):
+    return overlay(settings, {section: values})
+
+
+def png_photo(data):
     return tk.PhotoImage(data=base64.b64encode(data).decode("ascii"))
+
+
+def segmented(parent, values, command, **kw):
+    """iOS-style segmented control: dark text, the selected option is a raised pill."""
+    kw.setdefault("height", 38)
+    return ctk.CTkSegmentedButton(parent, values=values, command=command, font=font(14, "bold"),
+                                  fg_color=SUBTLE, unselected_color=SUBTLE, unselected_hover_color=SUBTLE_HOVER,
+                                  selected_color=PILL, selected_hover_color=PILL, text_color=TEXT,
+                                  corner_radius=10, **kw)
+
+
+def switch(parent, text, command, big=False, **kw):
+    size = dict(switch_width=62, switch_height=32) if big else dict(switch_width=44, switch_height=22)
+    return ctk.CTkSwitch(parent, text=text, command=command, fg_color=SWITCH_OFF, progress_color=kw.pop(
+        "progress_color", ACCENT), button_color=KNOB, button_hover_color=KNOB, border_width=0, **size, **kw)
+
+
+def small_button(parent, text, command, **kw):
+    kw.setdefault("height", 34)
+    return ctk.CTkButton(parent, text=text, command=command, corner_radius=10, font=font(13, "bold"),
+                         fg_color=ACCENT, hover_color=ACCENT_HOVER, text_color_disabled=MUTED, **kw)
+
+
+def dropdown(parent, values, command=None, **kw):
+    return ctk.CTkOptionMenu(parent, values=values, command=command, corner_radius=10, font=font(13),
+                             fg_color=PILL, button_color=PILL, button_hover_color=SUBTLE_HOVER, text_color=TEXT,
+                             dropdown_font=font(13), **kw)
+
+
+def scroll_frame(parent):
+    return ctk.CTkScrollableFrame(parent, fg_color="transparent", scrollbar_button_color=TRACK,
+                                  scrollbar_button_hover_color=BORDER)
+
+
+def card(parent, **kw):
+    kw.setdefault("fg_color", CARD)
+    return ctk.CTkFrame(parent, corner_radius=16, border_width=1, border_color=BORDER, **kw)
+
+
+def primary_button(parent, text, command, **kw):
+    kw.setdefault("height", 48)
+    return ctk.CTkButton(parent, text=text, command=command, corner_radius=12, font=font(15, "bold"),
+                         fg_color=ACCENT, hover_color=ACCENT_HOVER, **kw)
+
+
+def secondary_button(parent, text, command, **kw):
+    kw.setdefault("height", 48)
+    return ctk.CTkButton(parent, text=text, command=command, corner_radius=12, font=font(15, "bold"),
+                         fg_color=SUBTLE, hover_color=SUBTLE_HOVER, text_color=TEXT, **kw)
+
+
+def keycap(parent, key, caption):
+    box = ctk.CTkFrame(parent, fg_color="transparent")
+    ctk.CTkLabel(box, text=key, font=font(12, "bold"), fg_color=SUBTLE, corner_radius=6, width=46,
+                 height=26, text_color=TEXT).pack(side="left")
+    ctk.CTkLabel(box, text=caption, font=font(12), text_color=MUTED).pack(side="left", padx=(8, 0))
+    return box
+
+
+def window_scaling(widget):
+    try:
+        return ctk.ScalingTracker.get_window_scaling(widget.winfo_toplevel())
+    except Exception:
+        return 1.0
+
+
+def rounded_rect(canvas, x1, y1, x2, y2, r, **kw):
+    r = max(0, min(r, (x2 - x1) / 2, (y2 - y1) / 2))
+    pts = [x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2, x2 - r, y2,
+           x1 + r, y2, x1, y2, x1, y2 - r, x1, y1 + r, x1, y1]
+    return canvas.create_polygon(pts, smooth=True, **kw)
+
+
+def describe(snap):
+    """(title, subtitle, colour key) for the big status card."""
+    s = snap.settings
+    k = s.keys
+    state = snap.state
+    if snap.source_error:
+        return "Tracking problem", snap.source_error, "STOPPED"
+    if state.startswith("BUSY"):
+        return "Paused for setup", "Head control is paused while setup runs.", "BUSY"
+    if snap.tracking != TrackingStatus.OK:
+        if snap.source_kind == "webcam":
+            if snap.source_status != "running":
+                return "Starting camera", snap.source_status.capitalize(), "STARTING"
+            return "Can't see your face", "Sit facing the camera, with light on your face.", "STOPPED"
+        if snap.tracking == TrackingStatus.FROZEN:
+            return "Tracking froze", "OpenTrack may have lost your face.", "STOPPED"
+        return "No tracking", "Start OpenTrack with the HeadMouse profile and press Start.", "STOPPED"
+    if not snap.enabled:
+        game = s.general.game_window_title
+        if s.general.auto_enable_in_game and game:
+            return "Off", f"Turns on by itself in {game}  ·  or press {k.enable_toggle}", "OFF"
+        return "Off", f"Press {k.enable_toggle} or flip the switch to start", "OFF"
+    if state.startswith("WAITING"):
+        return "Waiting for the game", f"Moves the camera only in {s.general.game_window_title}", "WAITING"
+    if snap.paused:
+        return "Frozen", f"Release {k.pause_hold} to continue", "PAUSED"
+    if state.startswith("CENTER"):
+        return "Center your head", "Movement resumes once your head is back in the middle", "CENTER"
+    if "precision" in state:
+        return "Precision aim", f"Slow mode while {k.precision_hold} is held", "ACTIVE"
+    return "On", f"Hold {k.pause_hold} to freeze the camera", "ACTIVE"
+
+
+class HeadView:
+    """Canvas showing the head position, dead zone, full-speed box and direction arrows."""
+
+    def __init__(self, parent, width, height):
+        self.scale = window_scaling(parent)
+        self.w, self.h = int(width * self.scale), int(height * self.scale)
+        self.canvas = tk.Canvas(parent, width=self.w, height=self.h, highlightthickness=0, bd=0)
+
+    def draw(self, snap, bg=CARD):
+        c, w, h, k = self.canvas, self.w, self.h, self.scale
+        c.delete("all")
+        c.configure(bg=pick(bg))
+        s = snap.settings
+        cx, cy = w / 2, h / 2
+        xr = max(s.right.full_speed_angle, s.left.full_speed_angle) * 1.3
+        yr = max(s.up.full_speed_angle, s.down.full_speed_angle) * 1.3
+        sx, sy = (w / 2 - 26 * k) / xr, (h / 2 - 22 * k) / yr
+        muted = pick(MUTED)
+        if snap.tracking != TrackingStatus.OK or snap.source_error:
+            c.create_text(cx, cy - 10 * k, text="No tracking", fill=pick(DANGER), font=(FAMILY, 15, "bold"))
+            c.create_text(cx, cy + 14 * k, text="Movement is stopped for safety", fill=muted, font=(FAMILY, 10))
+            return
+        c.create_line(cx, 8 * k, cx, h - 8 * k, fill=pick(BORDER), width=1)
+        c.create_line(8 * k, cy, w - 8 * k, cy, fill=pick(BORDER), width=1)
+        rounded_rect(c, cx - s.left.full_speed_angle * sx, cy - s.up.full_speed_angle * sy,
+                     cx + s.right.full_speed_angle * sx, cy + s.down.full_speed_angle * sy, 14 * k,
+                     fill="", outline=pick(BORDER), width=2, dash=(6, 4))
+        rounded_rect(c, cx - s.left.deadzone * sx, cy - s.up.deadzone * sy,
+                     cx + s.right.deadzone * sx, cy + s.down.deadzone * sy, 8 * k,
+                     fill=pick(ZONE), outline=pick(ZONE_LINE), width=1)
+        moving = {"right": snap.yaw_speed > 0, "left": snap.yaw_speed < 0,
+                  "up": snap.pitch_speed > 0, "down": snap.pitch_speed < 0}
+        a = 9 * k
+        arrows = {"right": [(w - 6 * k, cy), (w - 6 * k - a, cy - a), (w - 6 * k - a, cy + a)],
+                  "left": [(6 * k, cy), (6 * k + a, cy - a), (6 * k + a, cy + a)],
+                  "up": [(cx, 4 * k), (cx - a, 4 * k + a), (cx + a, 4 * k + a)],
+                  "down": [(cx, h - 4 * k), (cx - a, h - 4 * k - a), (cx + a, h - 4 * k - a)]}
+        for name, pts in arrows.items():
+            c.create_polygon(*[v for p in pts for v in p],
+                             fill=pick(ACCENT) if moving[name] else pick(BORDER), outline="")
+        x = cx + max(-xr, min(xr, snap.yaw)) * sx
+        y = cy - max(-yr, min(yr, snap.pitch)) * sy
+        color = pick(ACCENT) if any(moving.values()) else pick(STATE_COLORS["ACTIVE"])
+        r = 11 * k
+        c.create_oval(x - r - 5 * k, y - r - 5 * k, x + r + 5 * k, y + r + 5 * k, fill="", outline=color, width=2)
+        c.create_oval(x - r, y - r, x + r, y + r, fill=color, outline=pick(bg), width=3)
+        c.create_text(12 * k, 10 * k, text="your head", anchor="nw", fill=muted, font=(FAMILY, 9))
 
 
 class MainWindow:
     def __init__(self, root, engine):
         self.root = root
         self.engine = engine
-        self.messages = []
-        self.preview_photo = None
         self.children = {}
+        self.preview_photo = None
+        self._last_title = None
         s = engine.settings
-        title = "HeadMouse" + ("  [DRY RUN - mouse will not move]" if engine.dry_run else "")
-        root.title(title)
-        root.configure(padx=12, pady=10)
+        root.title("HeadMouse" + ("  (test mode - the mouse will not move)" if engine.dry_run else ""))
+        root.configure(fg_color=BG)
+        root.resizable(False, False)
         root.attributes("-topmost", s.general.always_on_top)
+        outer = ctk.CTkFrame(root, fg_color="transparent")
+        outer.pack(fill="both", expand=True, padx=18, pady=16)
 
-        self.banner = tk.Label(root, text="STARTING", font=_font(26, True), fg="white", bg=COLORS["OFF"],
-                               pady=10)
-        self.banner.pack(fill="x")
-        self.hint = tk.Label(root, text="", font=_font(12), wraplength=440, justify="center", pady=4)
-        self.hint.pack(fill="x")
+        header = ctk.CTkFrame(outer, fg_color="transparent")
+        header.pack(fill="x")
+        ctk.CTkLabel(header, text="HeadMouse", font=font(22, "bold"), text_color=TEXT).pack(side="left")
+        self.chip = ctk.CTkLabel(header, text="", font=font(12, "bold"), corner_radius=12, height=26,
+                                 fg_color=SUBTLE, text_color=MUTED)
+        self.chip.pack(side="right")
 
-        self.canvas = tk.Canvas(root, width=300, height=190, bg="#fafafa", highlightthickness=1,
-                                highlightbackground="#bbb")
-        self.canvas.pack(pady=(6, 2))
-        self.speed_label = tk.Label(root, text="", font=_font(12))
-        self.speed_label.pack()
+        self.status = ctk.CTkFrame(outer, corner_radius=20, fg_color=STATE_COLORS["OFF"], height=110)
+        self.status.pack(fill="x", pady=(12, 10))
+        self.status.pack_propagate(False)
+        self.status_title = ctk.CTkLabel(self.status, text="", font=font(32, "bold"), text_color="white")
+        self.status_title.pack(anchor="w", padx=22, pady=(14, 0))
+        self.status_sub = ctk.CTkLabel(self.status, text="", font=font(14), text_color="white",
+                                       wraplength=380, justify="left")
+        self.status_sub.pack(anchor="w", padx=22)
 
-        grid = tk.Frame(root)
-        grid.pack(fill="x", pady=8)
-        grid.columnconfigure((0, 1), weight=1, uniform="b")
-        self.toggle_btn = _big_button(grid, "Turn ON", engine.toggle_enabled)
-        self.toggle_btn.grid(row=0, column=0, sticky="ew", padx=3, pady=3)
-        _big_button(grid, "Re-center", engine.recenter).grid(row=0, column=1, sticky="ew", padx=3, pady=3)
-        _big_button(grid, "Setup wizard", self.open_wizard).grid(row=1, column=0, sticky="ew", padx=3, pady=3)
-        _big_button(grid, "Sensitivity", self.open_sensitivity).grid(row=1, column=1, sticky="ew", padx=3,
-                                                                     pady=3)
-        tk.Button(grid, text="Game calibration", font=_font(11), command=self.open_calibration).grid(
-            row=2, column=0, sticky="ew", padx=3, pady=3)
-        tk.Button(grid, text="Tracker / OpenTrack", font=_font(11), command=self.open_tracker).grid(
-            row=2, column=1, sticky="ew", padx=3, pady=3)
+        sw = card(outer)
+        sw.pack(fill="x")
+        ctk.CTkLabel(sw, text="Head control", font=font(17, "bold"), text_color=TEXT).pack(
+            side="left", padx=18, pady=16)
+        self.switch = switch(sw, "", self._switch_flipped, big=True, progress_color=STATE_COLORS["ACTIVE"])
+        self.switch.pack(side="right", padx=14)
 
-        opts = tk.Frame(root)
-        opts.pack(fill="x")
-        self.show_camera = tk.BooleanVar(value=False)
-        self.camera_check = tk.Checkbutton(opts, text="Show camera", variable=self.show_camera,
-                                           font=_font(10), command=self._camera_toggled)
-        self.camera_check.pack(side="left")
-        self.on_top = tk.BooleanVar(value=s.general.always_on_top)
-        tk.Checkbutton(opts, text="Keep on top", variable=self.on_top, font=_font(10),
-                       command=self._on_top_toggled).pack(side="right")
-        self.preview = tk.Label(root)
-        self.preview.pack()
+        view = card(outer)
+        view.pack(fill="x", pady=10)
+        self.head = HeadView(view, 380, 170)
+        self.head.canvas.pack(padx=12, pady=(12, 4))
+        self.speed = ctk.CTkLabel(view, text="", font=font(14, "bold"), text_color=TEXT)
+        self.speed.pack(pady=(0, 12))
 
-        k = s.keys
-        self.keys_label = tk.Label(root, font=_font(10), fg="#444", justify="left")
-        self.keys_label.pack(fill="x", pady=(6, 0))
-        self._update_keys_label(k)
-        self.log = tk.Label(root, text="", font=_font(9), fg="#555", justify="left", anchor="w",
-                            wraplength=440)
-        self.log.pack(fill="x", pady=(4, 0))
+        buttons = ctk.CTkFrame(outer, fg_color="transparent")
+        buttons.pack(fill="x")
+        buttons.columnconfigure((0, 1), weight=1, uniform="b")
+        secondary_button(buttons, "Re-center", engine.recenter).grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        primary_button(buttons, "Settings", self.open_settings).grid(row=0, column=1, sticky="ew", padx=(6, 0))
+
+        self.keys = ctk.CTkFrame(outer, fg_color="transparent")
+        self.keys.pack(fill="x", pady=(14, 4))
+        self._keys_shown = None
+
+
+        footer = ctk.CTkFrame(outer, fg_color="transparent")
+        footer.pack(fill="x", side="bottom", pady=(8, 0))
+        self.camera_switch = switch(footer, "Camera", self._camera_toggled, font=font(12), text_color=MUTED)
+        self.camera_switch.pack(side="left")
+        self.top_switch = switch(footer, "Stay on top", self._top_toggled, font=font(12), text_color=MUTED)
+        self.top_switch.pack(side="right")
+        if s.general.always_on_top:
+            self.top_switch.select()
+        self.message = ctk.CTkLabel(outer, text="", font=font(11), text_color=MUTED, anchor="w")
+        self.message.pack(fill="x", side="bottom")
 
         root.protocol("WM_DELETE_WINDOW", self.close)
         self.refresh()
         if not s.general.setup_done:
-            root.after(600, self.open_wizard)
+            root.after(700, self.open_wizard)
 
-    def _update_keys_label(self, k):
-        self.keys_label.config(text=f"{k.enable_toggle}: on/off     {k.pause_hold} (hold): freeze camera\n"
-                                    f"{k.precision_hold} (hold): precision aim     {k.recenter}: re-center")
+    # --- actions ---------------------------------------------------------------
 
-    # --- child windows ---------------------------------------------------------
+    def _switch_flipped(self):
+        self.engine.set_enabled(bool(self.switch.get()))
 
-    def _open(self, name, cls):
+    def _camera_toggled(self):
+        if self.camera_switch.get():
+            self._open("camera", lambda: CameraWindow(self))
+        else:
+            win = self.children.get("camera")
+            if win is not None and win.alive():
+                win.close()
+
+    def _top_toggled(self):
+        on = bool(self.top_switch.get())
+        self.root.attributes("-topmost", on)
+        self.engine.apply_settings(replace(self.engine.settings, "general", always_on_top=on))
+
+    def _open(self, name, factory):
         win = self.children.get(name)
         if win is not None and win.top.winfo_exists():
             win.top.lift()
-            return
-        self.children[name] = cls(self)
+            win.top.focus_force()
+            return win
+        win = self.children[name] = factory()
+        return win
+
+    def open_settings(self, tab="Feel"):
+        win = self._open("settings", lambda: SettingsWindow(self, tab))
+        win.tabs.set(tab)
+        win.tab_changed()
+        return win
 
     def open_wizard(self):
-        self._open("wizard", WizardWindow)
-
-    def open_sensitivity(self):
-        self._open("sensitivity", SensitivityWindow)
-
-    def open_calibration(self):
-        self._open("calibration", CalibrationWindow)
-
-    def open_tracker(self):
-        self._open("tracker", TrackerWindow)
-
-    def _camera_toggled(self):
-        self.engine.set_preview(self.show_camera.get())
-        if not self.show_camera.get():
-            self.preview.config(image="")
-            self.preview_photo = None
-
-    def _on_top_toggled(self):
-        value = self.on_top.get()
-        self.root.attributes("-topmost", value)
-        self.engine.apply_settings(_replace(self.engine.settings, "general", always_on_top=value))
+        settings = self.children.get("settings")
+        if settings is not None and settings.top.winfo_exists():
+            if not settings.close():
+                return None
+        return self._open("wizard", lambda: WizardWindow(self))
 
     def close(self):
         self.engine.stop()
@@ -146,232 +342,816 @@ class MainWindow:
 
     # --- live updates ----------------------------------------------------------
 
-    def _hint(self, snap):
-        s = snap.settings
-        if snap.source_error:
-            return snap.source_error, "#c62828"
-        if snap.state.startswith("BUSY"):
-            return "Head control is paused while this runs.", "#1565c0"
-        if snap.tracking != TrackingStatus.OK:
-            if snap.source_kind == "webcam":
-                if snap.source_status != "running":
-                    return snap.source_status.capitalize(), "#444"
-                return "Looking for your face - sit facing the camera, with light on your face.", "#c62828"
-            if snap.tracking == TrackingStatus.FROZEN:
-                return "OpenTrack's tracking froze - it may have lost your face.", "#c62828"
-            return ("No data from OpenTrack - is it running with the HeadMouse profile, and Started?",
-                    "#c62828")
-        if not snap.enabled:
-            if s.general.auto_enable_in_game and s.general.game_window_title:
-                return (f"Turns ON automatically in {s.general.game_window_title}, or press "
-                        f"{s.keys.enable_toggle}.", "#444")
-            return f"Press {s.keys.enable_toggle} or 'Turn ON' to start.", "#444"
-        if snap.paused:
-            return "Frozen while the pause key is held.", "#444"
-        if snap.state.startswith("CENTER"):
-            return "Bring your head back to center to continue.", "#444"
-        return f"Hold {s.keys.pause_hold} to freeze the camera.", "#2e7d32"
-
-    def _draw_head(self, snap):
-        c = self.canvas
-        c.delete("all")
-        s = snap.settings
-        w, h = int(c["width"]), int(c["height"])
-        cx, cy = w / 2, h / 2
-        xr = max(s.right.full_speed_angle, s.left.full_speed_angle) * 1.25
-        yr = max(s.up.full_speed_angle, s.down.full_speed_angle) * 1.25
-        sx, sy = (w / 2 - 10) / xr, (h / 2 - 10) / yr
-        # full-speed box and dead-zone box (each side can differ)
-        c.create_rectangle(cx - s.left.full_speed_angle * sx, cy - s.up.full_speed_angle * sy,
-                           cx + s.right.full_speed_angle * sx, cy + s.down.full_speed_angle * sy,
-                           outline="#ef9a9a", dash=(4, 3))
-        c.create_rectangle(cx - s.left.deadzone * sx, cy - s.up.deadzone * sy,
-                           cx + s.right.deadzone * sx, cy + s.down.deadzone * sy,
-                           fill="#e8f5e9", outline="#81c784")
-        c.create_line(cx, 4, cx, h - 4, fill="#ddd")
-        c.create_line(4, cy, w - 4, cy, fill="#ddd")
-        for text, x, y, anchor in (("LEFT", 6, cy - 2, "sw"), ("RIGHT", w - 6, cy - 2, "se"),
-                                   ("UP", cx + 4, 4, "nw"), ("DOWN", cx + 4, h - 4, "sw")):
-            c.create_text(x, y, text=text, anchor=anchor, fill="#999", font=_font(8))
-        if snap.tracking == TrackingStatus.OK:
-            x = cx + max(-xr, min(xr, snap.yaw)) * sx
-            y = cy - max(-yr, min(yr, snap.pitch)) * sy
-            moving = snap.yaw_speed or snap.pitch_speed
-            color = "#1565c0" if moving else "#43a047"
-            c.create_oval(x - 9, y - 9, x + 9, y + 9, fill=color, outline="white", width=2)
-        else:
-            c.create_text(cx, cy, text="no tracking", fill="#c62828", font=_font(12, True))
+    def _show_keys(self, k):
+        shown = (k.enable_toggle, k.pause_hold, k.precision_hold, k.recenter)
+        if shown == self._keys_shown:
+            return
+        self._keys_shown = shown
+        for w in self.keys.winfo_children():
+            w.destroy()
+        self.keys.columnconfigure((0, 1), weight=1, uniform="k")
+        for i, (key, caption) in enumerate(((k.enable_toggle, "on / off"), (k.pause_hold, "hold to freeze"),
+                                            (k.precision_hold, "hold to aim slowly"), (k.recenter, "re-center"))):
+            keycap(self.keys, key, caption).grid(row=i // 2, column=i % 2, sticky="w", pady=3)
 
     def refresh(self):
         if not self.root.winfo_exists():
             return
         snap = self.engine.snapshot()
-        state = snap.state
-        key = state.split(":")[0].split(" ")[0]
-        label = {"STOPPED": "NO TRACKING", "BUSY": "BUSY", "WAITING": "NOT IN GAME",
-                 "CENTER": "CENTER HEAD"}.get(key, state)
-        if key == "ACTIVE" and "precision" in state:
-            label = "ACTIVE - PRECISION"
-        self.banner.config(text=label, bg=COLORS.get(key, COLORS["OFF"]))
-        text, color = self._hint(snap)
-        self.hint.config(text=text, fg=color)
-        self.toggle_btn.config(text="Turn OFF" if snap.enabled else "Turn ON")
-        self._draw_head(snap)
+        title, sub, key = describe(snap)
+        if (title, sub, key) != self._last_title:
+            self._last_title = (title, sub, key)
+            self.status.configure(fg_color=STATE_COLORS[key])
+            self.status_title.configure(text=title)
+            self.status_sub.configure(text=sub)
+        if bool(self.switch.get()) != snap.enabled:
+            self.switch.select() if snap.enabled else self.switch.deselect()
+        ok = snap.tracking == TrackingStatus.OK and not snap.source_error
+        source = "Webcam" if snap.source_kind == "webcam" else "OpenTrack"
+        self.chip.configure(text=f"  ●  {source}  ", text_color=STATE_COLORS["ACTIVE"] if ok else DANGER)
+        self.head.draw(snap)
         if snap.yaw_speed or snap.pitch_speed:
             parts = []
             if snap.yaw_speed:
-                parts.append(f"turning {'right' if snap.yaw_speed > 0 else 'left'} {abs(snap.yaw_speed):.0f}°/s")
+                parts.append(f"{'Right' if snap.yaw_speed > 0 else 'Left'}  {abs(snap.yaw_speed):.0f}°/s")
             if snap.pitch_speed:
-                parts.append(f"looking {'up' if snap.pitch_speed > 0 else 'down'} {abs(snap.pitch_speed):.0f}°/s")
-            self.speed_label.config(text=",  ".join(parts))
+                parts.append(f"{'Up' if snap.pitch_speed > 0 else 'Down'}  {abs(snap.pitch_speed):.0f}°/s")
+            self.speed.configure(text="   ·   ".join(parts), text_color=ACCENT)
         else:
-            self.speed_label.config(text="camera still")
-        self.camera_check.config(state="normal" if snap.source_kind == "webcam" else "disabled")
-        if self.show_camera.get():
-            png = self.engine.preview_png()
-            if png:
-                self.preview_photo = _png_photo(png)
-                self.preview.config(image=self.preview_photo)
-        for _, text in self.engine.drain_messages():
-            self.messages = (self.messages + [f"{time.strftime('%H:%M:%S')}  {text}"])[-3:]
-            self.log.config(text="\n".join(self.messages))
-        self._update_keys_label(snap.settings.keys)
+            self.speed.configure(text="Camera still", text_color=MUTED)
+        self.camera_switch.configure(state="normal" if snap.source_kind == "webcam" else "disabled")
+        self._show_keys(snap.settings.keys)
+        messages = self.engine.drain_messages()
+        if messages:
+            self.message.configure(text=f"{time.strftime('%H:%M')}   {messages[-1][1]}")
         self.root.after(40, self.refresh)
 
 
-class _Child:
+class Child:
     """Base for secondary windows."""
 
-    title = ""
-
-    def __init__(self, main):
+    def __init__(self, main, title, size):
         self.main = main
         self.engine = main.engine
-        self.top = tk.Toplevel(main.root)
-        self.top.title(self.title)
-        self.top.configure(padx=14, pady=12)
+        self.top = ctk.CTkToplevel(main.root)
+        self.top.title(title)
+        if size:
+            self.top.geometry(size)
+        self.top.configure(fg_color=BG)
         self.top.transient(main.root)
         self.top.protocol("WM_DELETE_WINDOW", self.close)
+        self.top.after(150, self.top.lift)  # CustomTkinter windows can open behind on Windows
+        self.top.after(160, self.top.focus_force)
 
     def close(self):
         self.top.destroy()
+        return True
 
     def alive(self):
         return self.top.winfo_exists()
 
 
-class WizardWindow(_Child):
-    title = "HeadMouse setup wizard"
-    STEPS = [
-        ("right", 0, "Turn your head to the RIGHT", "as far as is comfortable - no straining - and hold it."),
-        ("left", 0, "Turn your head to the LEFT", "as far as is comfortable, and hold it."),
-        ("up", 1, "Tilt your head UP", "as far as is comfortable, and hold it."),
-        ("down", 1, "Tilt your head DOWN", "as far as is comfortable, and hold it."),
-    ]
+class CameraWindow(Child):
+    """Small floating window with the camera picture (green dot = face found)."""
 
     def __init__(self, main):
-        super().__init__(main)
+        super().__init__(main, "HeadMouse camera", "")
+        self.top.resizable(False, False)
+        root = main.root
+        self.top.geometry(f"+{root.winfo_rootx() + root.winfo_width() + 12}+{root.winfo_rooty()}")  # beside it
+        self.photo = None
+        frame = card(self.top)
+        frame.pack(padx=12, pady=12)
+        self.label = tk.Label(frame, bd=0, text="Waiting for the camera...", font=(FAMILY, 11))
+        self.label.pack(padx=10, pady=10)
+        self.engine.set_preview(True)
+        self.poll()
+
+    def close(self):
+        self.engine.set_preview(False)
+        self.main.camera_switch.deselect()
+        self.top.destroy()
+        return True
+
+    def poll(self):
+        if not self.alive():
+            return
+        png = self.engine.preview_png()
+        if png:
+            self.photo = png_photo(png)
+            self.label.configure(image=self.photo, text="", bg=pick(CARD))
+        else:
+            self.label.configure(bg=pick(CARD), fg=pick(MUTED))
+        self.top.after(100, self.poll)
+
+
+class SliderRow:
+    """Label, value chip and slider, in one row."""
+
+    def __init__(self, parent, label, lo, hi, step, fmt, command, help_text="", chip=SUBTLE):
+        self.fmt = fmt
+        self.frame = ctk.CTkFrame(parent, fg_color="transparent")
+        top = ctk.CTkFrame(self.frame, fg_color="transparent")
+        top.pack(fill="x")
+        ctk.CTkLabel(top, text=label, font=font(14, "bold"), text_color=TEXT).pack(side="left")
+        self.value = ctk.CTkLabel(top, text="", font=font(13, "bold"), fg_color=chip, corner_radius=8,
+                                  text_color=TEXT, width=70, height=26)
+        self.value.pack(side="right")
+        if help_text:
+            ctk.CTkLabel(self.frame, text=help_text, font=font(11), text_color=MUTED, anchor="w").pack(fill="x")
+        self.slider = ctk.CTkSlider(self.frame, from_=lo, to=hi, number_of_steps=max(1, round((hi - lo) / step)),
+                                    command=self._moved, height=20, button_length=0,
+                                    button_color=ACCENT, button_hover_color=ACCENT_HOVER, progress_color=ACCENT,
+                                    fg_color=TRACK)
+        self.slider.pack(fill="x", pady=(4, 0))
+        self.command = command
+
+    def _moved(self, value):
+        self.value.configure(text=self.fmt(value))
+        self.command(value)
+
+    def set(self, value):
+        self.slider.set(value)
+        self.value.configure(text=self.fmt(value))
+
+    def get(self):
+        return self.slider.get()
+
+    def enable(self, on):
+        self.slider.configure(state="normal" if on else "disabled")
+
+
+class SettingsWindow(Child):
+    """All settings in four tabs. Changes are tried live; Save keeps them."""
+
+    KEYCAP = dict(fg_color=PILL, hover_color=SUBTLE_HOVER, text_color=TEXT, border_width=1, border_color=BORDER)
+    KEYCAP_ACTIVE = dict(fg_color=ACCENT, hover_color=ACCENT_HOVER, text_color="white", border_width=0)
+
+    def __init__(self, main, tab="Feel"):
+        super().__init__(main, "HeadMouse settings", "600x760")
+        self.original = self.engine.settings
+        self.work = self.engine.settings
+        self.dirty = False
+        self._pending = None
+        self._capturing = None
+        self.direction = "right"
+
+        bar = ctk.CTkFrame(self.top, fg_color="transparent")
+        bar.pack(side="bottom", fill="x", padx=18, pady=(6, 16))
+        self.saved_label = ctk.CTkLabel(self.top, text="", font=font(12), text_color=MUTED)
+        self.saved_label.pack(side="bottom", fill="x", padx=22)
+        primary_button(bar, "Save", self.save, width=130, height=44).pack(side="right")
+        secondary_button(bar, "Undo changes", self.discard, width=150, height=44).pack(side="right", padx=8)
+
+        self.tabs = ctk.CTkTabview(self.top, fg_color=CARD, corner_radius=16, command=self.tab_changed,
+                                   border_width=1, border_color=BORDER, segmented_button_fg_color=SUBTLE,
+                                   segmented_button_unselected_color=SUBTLE,
+                                   segmented_button_unselected_hover_color=SUBTLE_HOVER,
+                                   segmented_button_selected_color=PILL, segmented_button_selected_hover_color=PILL,
+                                   text_color=TEXT)
+        self.tabs.pack(fill="both", expand=True, padx=18, pady=(12, 0))
+        for name in ("Feel", "Tracking", "Game", "Keys & sound"):
+            self.tabs.add(name)
+        self.tabs._segmented_button.configure(font=font(14, "bold"), height=36)
+        self._feel_tab(self.tabs.tab("Feel"))
+        self._tracking_tab(self.tabs.tab("Tracking"))
+        self._game_tab(self.tabs.tab("Game"))
+        self._keys_tab(self.tabs.tab("Keys & sound"))
+        self.tabs.set(tab)
+        self.tab_changed()
+        self.poll()
+
+    # --- change handling -----------------------------------------------------
+
+    def changes(self):
+        return config.diff(self.original, self.work)
+
+    def _set(self, section, **values):
+        self.work = replace(self.work, section, **values)
+        self.dirty = bool(self.changes())
+        self.saved_label.configure(text="You're trying out changes - press Save to keep them" if self.dirty else "")
+        if self._pending:
+            self.top.after_cancel(self._pending)
+        self._pending = self.top.after(200, self._apply_live)
+
+    def _apply_live(self):
+        self._pending = None
+        self.engine.apply_settings(overlay(self.engine.settings, self.changes()), save=False)
+
+    def save(self):
+        final = overlay(self.engine.settings, self.changes())
+        try:
+            config.validate(final)
+        except config.SettingsError as e:
+            messagebox.showerror("HeadMouse", str(e), parent=self.top)
+            return False
+        if self._pending:
+            self.top.after_cancel(self._pending)
+        self.engine.apply_settings(final, save=True)
+        self.dirty = False
+        return self._close_window()
+
+    def discard(self):
+        if self._pending:
+            self.top.after_cancel(self._pending)
+        back = config.diff(self.work, self.original)
+        self.engine.apply_settings(overlay(self.engine.settings, back), save=False)
+        self.dirty = False
+        return self._close_window()
+
+    def close(self):
+        if not self.dirty:
+            return self._close_window()
+        answer = messagebox.askyesnocancel("HeadMouse", "Save your changes?", parent=self.top)
+        if answer is None:
+            return False
+        return self.save() if answer else self.discard()
+
+    def _close_window(self):
+        self.engine.set_hold("calibration", False)
+        self.engine.calibration_mode = False
+        self.top.destroy()
+        return True
+
+    def tab_changed(self):
+        game = self.tabs.get() == "Game"
+        self.engine.calibration_mode = game
+        self.engine.set_hold("calibration", game)  # the head must not turn the camera while calibrating
+
+    # --- Feel ----------------------------------------------------------------
+
+    def _feel_tab(self, tab):
+        scroll = scroll_frame(tab)
+        scroll.pack(fill="both", expand=True)
+        ctk.CTkLabel(scroll, text="Which direction?", font=font(13), text_color=MUTED).pack(anchor="w")
+        self.dir_buttons = segmented(scroll, ["Right", "Left", "Up", "Down"], self._direction_selected)
+        self.dir_buttons.pack(fill="x", pady=(4, 10))
+        self.dir_buttons.set("Right")
+        graph_card = ctk.CTkFrame(scroll, fg_color=SUBTLE, corner_radius=14)
+        graph_card.pack(fill="x")
+        self.graph_scale = window_scaling(tab)
+        self.graph = tk.Canvas(graph_card, width=int(500 * self.graph_scale), height=int(150 * self.graph_scale),
+                               highlightthickness=0, bd=0)
+        self.graph.pack(padx=8, pady=8)
+        self.points_note = ctk.CTkFrame(scroll, fg_color="transparent")
+        ctk.CTkLabel(self.points_note, text="This direction uses a custom table from the settings file.",
+                     font=font(12), text_color=MUTED).pack(side="left")
+        small_button(self.points_note, "Use sliders", self._drop_points, width=110).pack(side="right")
+
+        deg = lambda v: f"{v:.1f}°"
+        speed = lambda v: f"{v:.0f}°/s"
+        self.rows = {
+            "full_speed_angle": SliderRow(scroll, "Head turn for full speed", 3, 45, 0.5, deg,
+                                          lambda v: self._dir_changed("full_speed_angle", v),
+                                          "Smaller = less head movement needed"),
+            "max_speed": SliderRow(scroll, "Top speed", 10, 360, 5, speed,
+                                   lambda v: self._dir_changed("max_speed", v), "Fastest camera turn"),
+            "deadzone": SliderRow(scroll, "Dead zone", 0, 10, 0.1, deg,
+                                  lambda v: self._dir_changed("deadzone", v),
+                                  "How far you can move before the camera starts turning"),
+            "min_speed": SliderRow(scroll, "Slowest speed", 0, 60, 0.5, speed,
+                                   lambda v: self._dir_changed("min_speed", v), "Speed just outside the dead zone"),
+            "curve": SliderRow(scroll, "Curve", 0.5, 4, 0.05, lambda v: f"{v:.2f}",
+                               lambda v: self._dir_changed("curve", v),
+                               "Higher = finer control near the middle, faster further out"),
+        }
+        for name in ("full_speed_angle", "max_speed", "deadzone"):
+            self.rows[name].frame.pack(fill="x", pady=(12, 0))
+        self.advanced = switch(scroll, "Show advanced", self._advanced, font=font(13), text_color=TEXT)
+        self.advanced.pack(anchor="w", pady=(14, 0))
+        self.adv_frame = ctk.CTkFrame(scroll, fg_color="transparent")
+        for name in ("min_speed", "curve"):
+            self.rows[name].frame.pack(in_=self.adv_frame, fill="x", pady=(10, 0))
+        self.copy_button = secondary_button(scroll, "Copy to Left", self._copy, height=38)
+        self.copy_button.pack(anchor="w", pady=(14, 0))
+        ctk.CTkFrame(scroll, height=1, fg_color=BORDER).pack(fill="x", pady=16)
+        self.precision = SliderRow(scroll, "Precision aim speed", 5, 100, 5, lambda v: f"{v:.0f}%",
+                                   lambda v: self._set("motion", precision_speed_factor=round(v / 100, 2)),
+                                   "Camera speed while the precision key is held")
+        self.precision.frame.pack(fill="x")
+        self.precision.set(self.work.motion.precision_speed_factor * 100)
+        self._load_direction()
+
+    def _advanced(self):
+        if self.advanced.get():
+            self.adv_frame.pack(fill="x", after=self.advanced)
+        else:
+            self.adv_frame.pack_forget()
+
+    def _direction_selected(self, value):
+        self.direction = value.lower()
+        self._load_direction()
+
+    def _load_direction(self):
+        d = getattr(self.work, self.direction)
+        for name, row in self.rows.items():
+            row.set(getattr(d, name))
+            row.enable(not d.points)
+        if d.points:
+            self.points_note.pack(fill="x", pady=(8, 0), after=self.graph.master)
+        else:
+            self.points_note.pack_forget()
+        self.copy_button.configure(text=f"Copy these to {PAIRS[self.direction].title()}")
+
+    def _drop_points(self):
+        self._set(self.direction, points=[])
+        self._load_direction()
+
+    def _dir_changed(self, field, value):
+        d = getattr(self.work, self.direction)
+        values = {f: round(r.get(), 3) for f, r in self.rows.items()}
+        values[field] = round(value, 3)
+        if values["full_speed_angle"] <= values["deadzone"]:
+            values["full_speed_angle"] = values["deadzone"] + 0.5
+            self.rows["full_speed_angle"].set(values["full_speed_angle"])
+        if values["min_speed"] > values["max_speed"]:
+            values["min_speed"] = values["max_speed"]
+            self.rows["min_speed"].set(values["min_speed"])
+        if d.points:
+            return
+        self._set(self.direction, **values)
+
+    def _copy(self):
+        src = getattr(self.work, self.direction)
+        self._set(PAIRS[self.direction], **{f: getattr(src, f) for f in self.rows} | {"points": list(src.points)})
+        self.saved_label.configure(text=f"Copied to {PAIRS[self.direction].title()}")
+
+    def _plot(self, snap):
+        c, k = self.graph, self.graph_scale
+        d = getattr(self.work, self.direction)
+        curve = DirectionCurve(d)
+        bg = pick(SUBTLE)
+        c.delete("all")
+        c.configure(bg=bg)
+        w, h = int(c["width"]), int(c["height"])
+        x_max = max(20.0, (max(p[0] for p in d.points) if d.points else d.full_speed_angle) * 1.4)
+        y_top = max(10.0, max(curve.speed(i * x_max / 100) for i in range(101)))
+        left, bottom, top = 44 * k, h - 22 * k, 12 * k
+        px = lambda a: left + a / x_max * (w - left - 12 * k)
+        py = lambda v: bottom - v / (y_top * 1.1) * (bottom - top)
+        muted = pick(MUTED)
+        for a in range(0, int(x_max) + 1, 5):
+            c.create_text(px(a), bottom + 11 * k, text=f"{a}°", fill=muted, font=(FAMILY, 9))
+        for v in (0, y_top / 2, y_top):
+            c.create_line(left, py(v), w - 12 * k, py(v), fill=pick(BORDER))
+            c.create_text(left - 6 * k, py(v), text=f"{v:.0f}", anchor="e", fill=muted, font=(FAMILY, 9))
+        c.create_rectangle(left, top, px(d.deadzone), bottom, fill=pick(ZONE), outline="")
+        pts = []
+        for i in range(161):
+            a = x_max * i / 160
+            pts += [px(a), py(curve.speed(a))]
+        c.create_line(*pts, fill=pick(ACCENT), width=3, smooth=True)
+        c.create_text(left + 6 * k, top, text="camera °/s", anchor="nw", fill=muted, font=(FAMILY, 9))
+        if snap.tracking == TrackingStatus.OK:
+            value = {"right": snap.yaw, "left": -snap.yaw, "up": snap.pitch, "down": -snap.pitch}[self.direction]
+            if value > 0:
+                a = min(value, x_max)
+                x, y, r = px(a), py(curve.speed(a)), 7 * k
+                c.create_oval(x - r, y - r, x + r, y + r, fill=pick(DANGER), outline=bg, width=2)
+
+    # --- Tracking ------------------------------------------------------------
+
+    def _tracking_tab(self, tab):
+        scroll = scroll_frame(tab)
+        scroll.pack(fill="both", expand=True)
+        primary_button(scroll, "Measure my head movement (setup wizard)", self.main.open_wizard).pack(
+            fill="x", pady=(0, 14))
+        ctk.CTkLabel(scroll, text="How is your head tracked?", font=font(15, "bold"), text_color=TEXT).pack(
+            anchor="w")
+        self.source = segmented(scroll, ["Built-in webcam", "OpenTrack"], self._source_selected)
+        self.source.pack(fill="x", pady=(6, 4))
+        self.source.set("Built-in webcam" if self.work.tracking.source == "webcam" else "OpenTrack")
+        self.track_status = ctk.CTkLabel(scroll, text="", font=font(13), anchor="w")
+        self.track_status.pack(fill="x", pady=(0, 10))
+
+        cam = ctk.CTkFrame(scroll, fg_color=SUBTLE, corner_radius=14)
+        cam.pack(fill="x")
+        row = ctk.CTkFrame(cam, fg_color="transparent")
+        row.pack(fill="x", padx=14, pady=(12, 0))
+        ctk.CTkLabel(row, text="Webcam", font=font(14, "bold"), text_color=TEXT).pack(side="left")
+        self.camera = dropdown(row, [f"Camera {i}" for i in range(6)], width=140,
+                               command=lambda v: self._set("webcam", camera_index=int(v.split()[-1])))
+        self.camera.set(f"Camera {self.work.webcam.camera_index}")
+        self.camera.pack(side="right")
+        self.steady = SliderRow(cam, "Steadiness", 0.2, 4.0, 0.1,
+                                lambda v: "steady" if v < 0.8 else "quick" if v > 2 else "balanced",
+                                lambda v: self._set("webcam", smoothing_min_cutoff=round(v, 2)),
+                                "Left = steadier (less jitter), right = quicker (less lag)", chip=PILL)
+        self.steady.frame.pack(fill="x", padx=14, pady=(10, 14))
+        self.steady.set(self.work.webcam.smoothing_min_cutoff)
+
+        ot = ctk.CTkFrame(scroll, fg_color=SUBTLE, corner_radius=14)
+        ot.pack(fill="x", pady=(12, 0))
+        ctk.CTkLabel(ot, text="OpenTrack", font=font(14, "bold"), text_color=TEXT).pack(anchor="w", padx=14,
+                                                                                      pady=(12, 0))
+        ctk.CTkLabel(ot, text="Make a 'HeadMouse' profile from one of yours. Your camera and tracker settings "
+                              "are kept and your existing profiles are not changed.", font=font(12),
+                     text_color=MUTED, wraplength=470, justify="left").pack(anchor="w", padx=14)
+        self.folder = next((f for f in opentrack_setup.profile_folders(self.work.opentrack.opentrack_exe)
+                            if f.is_dir()), None)
+        profiles = opentrack_setup.list_profiles(self.folder) if self.folder else []
+        profiles = [p for p in profiles if p != opentrack_setup.PROFILE_NAME] or profiles
+        row = ctk.CTkFrame(ot, fg_color="transparent")
+        row.pack(fill="x", padx=14, pady=8)
+        self.profile = dropdown(row, profiles or ["No profiles found"], width=210)
+        current = opentrack_setup.current_profile()
+        self.profile.set(current if current in profiles else (profiles[0] if profiles else "No profiles found"))
+        if not profiles:
+            self.profile.configure(state="disabled")
+        self.profile.pack(side="left")
+        small_button(row, "Create profile", self._make_profile,
+                     state="normal" if profiles else "disabled").pack(side="right")
+        row2 = ctk.CTkFrame(ot, fg_color="transparent")
+        row2.pack(fill="x", padx=14, pady=(0, 12))
+        ctk.CTkButton(row2, text="Start OpenTrack", command=self._launch, height=34, corner_radius=10,
+                      font=font(13, "bold"), fg_color=PILL, text_color=TEXT, hover_color=SUBTLE_HOVER).pack(side="left")
+        self.autolaunch = switch(row2, "Start it with HeadMouse", lambda: self._set(
+            "opentrack", launch_opentrack=bool(self.autolaunch.get())), font=font(12), text_color=TEXT)
+        if self.work.opentrack.launch_opentrack:
+            self.autolaunch.select()
+        self.autolaunch.pack(side="right")
+
+    def _source_selected(self, value):
+        self._set("tracking", source="webcam" if value == "Built-in webcam" else "opentrack")
+
+    def _make_profile(self):
+        try:
+            dest, backup = opentrack_setup.make_headmouse_profile(self.folder, self.profile.get(),
+                                                                  self.work.opentrack.port)
+        except OSError as e:
+            messagebox.showerror("HeadMouse", f"Could not create the profile: {e}", parent=self.top)
+            return
+        note = f"\n\nThe previous one was backed up as {backup.name}." if backup else ""
+        messagebox.showinfo("HeadMouse", f"Created the HeadMouse profile.{note}\n\nIn OpenTrack, choose "
+                                         "'HeadMouse' in the profile list, then press Start.", parent=self.top)
+
+    def _launch(self):
+        messagebox.showinfo("HeadMouse", opentrack_setup.launch_if_needed(self.work.opentrack.opentrack_exe),
+                            parent=self.top)
+
+    # --- Game ----------------------------------------------------------------
+
+    def _game_tab(self, tab):
+        scroll = scroll_frame(tab)
+        scroll.pack(fill="both", expand=True)
+        ctk.CTkLabel(scroll, text="Match HeadMouse to the game", font=font(15, "bold"), text_color=TEXT).pack(
+            anchor="w")
+        ctk.CTkLabel(scroll, text="Head control is paused while this tab is open.", font=font(12),
+                     text_color=MUTED).pack(anchor="w")
+        k = self.work.keys
+        steps = ("Start Enshrouded and set its mouse sensitivity how you like it.",
+                 f"Face something easy to recognise. Press Test turn (or {k.calibrate_turn} in the game).",
+                 "The camera should turn exactly one full circle.",
+                 "If it didn't, say how far it turned and press Fix it. Repeat until it's right.")
+        for i, text in enumerate(steps, 1):
+            row = ctk.CTkFrame(scroll, fg_color="transparent")
+            row.pack(fill="x", pady=4)
+            ctk.CTkLabel(row, text=str(i), width=28, height=28, corner_radius=14, fg_color=ACCENT,
+                         text_color="white", font=font(13, "bold")).pack(side="left", anchor="n")
+            ctk.CTkLabel(row, text=text, font=font(13), text_color=TEXT, wraplength=430, justify="left").pack(
+                side="left", padx=10)
+        self.turn_button = primary_button(scroll, "Test turn in 5 seconds", self._countdown)
+        self.turn_button.pack(fill="x", pady=(10, 8))
+        fix = ctk.CTkFrame(scroll, fg_color=SUBTLE, corner_radius=14)
+        fix.pack(fill="x")
+        ctk.CTkLabel(fix, text="It actually turned about", font=font(13), text_color=TEXT).pack(
+            side="left", padx=(14, 6), pady=12)
+        self.degrees = ctk.CTkEntry(fix, width=70, font=font(13, "bold"), justify="center", corner_radius=8,
+                                    fg_color=PILL, border_color=BORDER, text_color=TEXT)
+        self.degrees.insert(0, "360")
+        self.degrees.pack(side="left")
+        ctk.CTkLabel(fix, text="°", font=font(13), text_color=TEXT).pack(side="left", padx=(2, 8))
+        small_button(fix, "Fix it", self._correct, width=90).pack(side="right", padx=12)
+        self.counts_label = ctk.CTkLabel(scroll, text="", font=font(11), text_color=MUTED)
+        self.counts_label.pack(anchor="w", pady=(4, 0))
+        self._show_counts()
+        ctk.CTkLabel(scroll, text="Tip: one and a half turns = 540°, three quarters = 270°.", font=font(11),
+                     text_color=MUTED).pack(anchor="w")
+        ctk.CTkFrame(scroll, height=1, fg_color=BORDER).pack(fill="x", pady=14)
+        g = self.work.general
+        self.auto = switch(scroll, f"Turn on by itself in {g.game_window_title or 'the game'}", lambda: self._set(
+            "general", auto_enable_in_game=bool(self.auto.get())), font=font(13), text_color=TEXT)
+        if g.auto_enable_in_game:
+            self.auto.select()
+        self.auto.pack(anchor="w", pady=4)
+        self.invert = switch(scroll, "Reverse up/down (look up = camera down)", lambda: self._set(
+            "mouse", invert_vertical=bool(self.invert.get())), font=font(13), text_color=TEXT)
+        if self.work.mouse.invert_vertical:
+            self.invert.select()
+        self.invert.pack(anchor="w", pady=4)
+
+    def _show_counts(self):
+        self.counts_label.configure(text=f"Currently {self.work.mouse.counts_per_360:g} mouse counts per full turn")
+
+    def _countdown(self, n=5):
+        if not self.alive():
+            return
+        if n == 0:
+            self.turn_button.configure(text="Test turn in 5 seconds", state="normal")
+            self.engine.start_test_turn()
+            return
+        self.turn_button.configure(text=f"Click into the game...  {n}", state="disabled")
+        self.top.after(1000, lambda: self._countdown(n - 1))
+
+    def _correct(self):
+        try:
+            turned = float(self.degrees.get())
+            if not 10 <= turned <= 3600:
+                raise ValueError
+        except ValueError:
+            messagebox.showerror("HeadMouse", "Type how many degrees it turned, e.g. 400.", parent=self.top)
+            return
+        counts = round(self.work.mouse.counts_per_360 * 360.0 / turned, 1)
+        self._set("mouse", counts_per_360=counts)
+        self._show_counts()
+        self.degrees.delete(0, "end")
+        self.degrees.insert(0, "360")
+
+    # --- Keys & sound ----------------------------------------------------------
+
+    def _keys_tab(self, tab):
+        scroll = scroll_frame(tab)
+        scroll.pack(fill="both", expand=True)
+        ctk.CTkLabel(scroll, text="Keys", font=font(15, "bold"), text_color=TEXT).pack(anchor="w")
+        ctk.CTkLabel(scroll, text="Click a key, then press the key you want - or tap your foot pedal.",
+                     font=font(12), text_color=MUTED).pack(anchor="w", pady=(0, 6))
+        self.key_buttons = {}
+        for field, label in (("pause_hold", "Freeze camera (hold)"), ("enable_toggle", "Head control on/off"),
+                             ("precision_hold", "Precision aim (hold)"), ("recenter", "Re-center"),
+                             ("calibrate_turn", "Test turn (game calibration)")):
+            row = ctk.CTkFrame(scroll, fg_color=SUBTLE, corner_radius=12)
+            row.pack(fill="x", pady=3)
+            ctk.CTkLabel(row, text=label, font=font(13), text_color=TEXT).pack(side="left", padx=14, pady=10)
+            b = ctk.CTkButton(row, text=getattr(self.work.keys, field) or "none", width=120, height=34,
+                              corner_radius=8, font=font(13, "bold"), command=lambda f=field: self._capture(f),
+                              **self.KEYCAP)
+            b.pack(side="right", padx=10)
+            self.key_buttons[field] = b
+        ctk.CTkFrame(scroll, height=1, fg_color=BORDER).pack(fill="x", pady=14)
+        ctk.CTkLabel(scroll, text="Sound", font=font(15, "bold"), text_color=TEXT).pack(anchor="w")
+        self.sound = switch(scroll, "Play sounds (on, off, tracking lost)", lambda: self._set(
+            "sounds", enabled=bool(self.sound.get())), font=font(13), text_color=TEXT)
+        if self.work.sounds.enabled:
+            self.sound.select()
+        self.sound.pack(anchor="w", pady=6)
+        self.volume = SliderRow(scroll, "Volume", 0, 100, 5, lambda v: f"{v:.0f}%",
+                                lambda v: self._set("sounds", volume=round(v / 100, 2)))
+        self.volume.frame.pack(fill="x")
+        self.volume.set(self.work.sounds.volume * 100)
+        secondary_button(scroll, "Play a test sound", lambda: self.top.after(250, lambda: self.engine.play_sound(
+            "enabled")), height=36).pack(anchor="w", pady=8)
+        ctk.CTkFrame(scroll, height=1, fg_color=BORDER).pack(fill="x", pady=10)
+        ctk.CTkLabel(scroll, text="Appearance", font=font(15, "bold"), text_color=TEXT).pack(anchor="w")
+        self.theme = segmented(scroll, ["System", "Light", "Dark"], self._theme, width=300)
+        self.theme.set(self.work.general.theme.title())
+        self.theme.pack(anchor="w", pady=6)
+
+    def _theme(self, value):
+        ctk.set_appearance_mode(value.lower())
+        self._set("general", theme=value.lower())
+
+    def _capture(self, field):
+        if self._capturing:
+            self.key_buttons[self._capturing].configure(text=getattr(self.work.keys, self._capturing) or "none",
+                                                        **self.KEYCAP)
+        self._capturing = field
+        self.key_buttons[field].configure(text="Press a key...", **self.KEYCAP_ACTIVE)
+        self.top.bind("<KeyPress>", self._key_pressed)
+        self.top.focus_force()
+
+    def _key_pressed(self, event):
+        field = self._capturing
+        if field is None:
+            return
+        if event.keysym == "Escape":
+            name = getattr(self.work.keys, field)
+        else:
+            name = name_from_tk_keysym(event.keysym)
+            if name is None:
+                self.saved_label.configure(text=f"'{event.keysym}' can't be used - try another key")
+                return
+            clash = next((f for f in self.key_buttons if f != field and getattr(self.work.keys, f) == name), None)
+            if clash:
+                self.saved_label.configure(text=f"{name} is already used - choose another key")
+                return
+            self._set("keys", **{field: name})
+        self.key_buttons[field].configure(text=name or "none", **self.KEYCAP)
+        self._capturing = None
+        self.top.unbind("<KeyPress>")
+
+    # --- live ----------------------------------------------------------------
+
+    def poll(self):
+        if not self.alive():
+            return
+        snap = self.engine.snapshot()
+        if self.tabs.get() == "Feel":
+            self._plot(snap)
+        ok = snap.tracking == TrackingStatus.OK and not snap.source_error
+        self.track_status.configure(text="●  Tracking OK" if ok else f"●  {snap.source_status}",
+                                    text_color=STATE_COLORS["ACTIVE"] if ok else DANGER)
+        self.top.after(60, self.poll)
+
+
+class WizardWindow(Child):
+    """Step-by-step setup: choose tracker, then measure comfortable head movement."""
+
+    STEPS = [  # name, axis, title, (dx, dy) for the drawing
+        ("right", 0, "Turn your head to the right", (1, 0)),
+        ("left", 0, "Turn your head to the left", (-1, 0)),
+        ("up", 1, "Tilt your head up", (0, -1)),
+        ("down", 1, "Tilt your head down", (0, 1)),
+    ]
+    TOTAL = 7
+
+    def __init__(self, main):
+        super().__init__(main, "HeadMouse setup", "640x640")
         self.engine.set_hold("wizard", True)
         self.samples = []
         self.capturing = None
         self.neutral = None
         self.movements = {}
-        self.step = -1
-        self.top.minsize(560, 480)
-        buttons = tk.Frame(self.top)
-        buttons.pack(side="bottom", fill="x", pady=(8, 0))  # packed first so it is never cut off
-        self.heading = tk.Label(self.top, font=_font(18, True), wraplength=520, justify="center")
-        self.heading.pack(pady=(4, 6))
-        self.body = tk.Label(self.top, font=_font(12), wraplength=520, justify="left")
-        self.body.pack(fill="x")
-        self.extra = tk.Frame(self.top)
-        self.extra.pack(fill="both", expand=True, pady=6)
-        self.meter = tk.Canvas(self.top, width=520, height=34, bg="#fafafa", highlightthickness=0)
-        self.meter.pack(pady=4)
-        self.status = tk.Label(self.top, font=_font(11), fg="#444")
-        self.status.pack()
-        self.back_btn = tk.Button(buttons, text="Cancel", font=_font(12), command=self.close, width=10)
-        self.back_btn.pack(side="left")
-        self.next_btn = tk.Button(buttons, text="Next", font=_font(13, True), command=self.next, width=14)
-        self.next_btn.pack(side="right")
+        self.step = 0
+        self.photo = None
+
+        buttons = ctk.CTkFrame(self.top, fg_color="transparent")
+        buttons.pack(side="bottom", fill="x", padx=24, pady=(6, 20))
+        self.back = secondary_button(buttons, "Cancel", self.close, width=140)
+        self.back.pack(side="left")
+        self.next_button = primary_button(buttons, "Next", self.next, width=200)
+        self.next_button.pack(side="right")
+
+        body = card(self.top)
+        body.pack(fill="both", expand=True, padx=24, pady=(20, 6))
+        top = ctk.CTkFrame(body, fg_color="transparent")
+        top.pack(fill="x", padx=24, pady=(20, 0))
+        self.step_label = ctk.CTkLabel(top, text="", font=font(12, "bold"), text_color=MUTED)
+        self.step_label.pack(anchor="w")
+        self.progress = ctk.CTkProgressBar(top, height=8, progress_color=ACCENT, fg_color=TRACK)
+        self.progress.pack(fill="x", pady=(6, 0))
+        self.heading = ctk.CTkLabel(body, text="", font=font(24, "bold"), text_color=TEXT, wraplength=540,
+                                    justify="left", anchor="w")
+        self.heading.pack(fill="x", padx=24, pady=(18, 4))
+        self.text = ctk.CTkLabel(body, text="", font=font(15), text_color=MUTED, wraplength=540, justify="left",
+                                 anchor="w")
+        self.text.pack(fill="x", padx=24)
+        self.content = ctk.CTkFrame(body, fg_color="transparent")
+        self.content.pack(fill="both", expand=True, padx=24, pady=10)
+        self.status = ctk.CTkLabel(body, text="", font=font(14, "bold"))
+        self.status.pack(pady=(0, 16))
         self.show_intro()
         self.poll()
 
     def close(self):
         self.engine.set_hold("wizard", False)
-        self.engine.set_preview(self.main.show_camera.get())
-        super().close()
+        camera = self.main.children.get("camera")
+        self.engine.set_preview(camera is not None and camera.alive())
+        self.top.destroy()
+        return True
 
-    def _clear_extra(self):
-        for w in self.extra.winfo_children():
+    def _clear(self):
+        for w in self.content.winfo_children():
             w.destroy()
+        self.photo = None
+        self.preview = None
+        self.figure = None
+        self.meter = None
+
+    def _set_step(self, n):
+        self.step = n
+        self.step_label.configure(text=f"STEP {n + 1} OF {self.TOTAL}")
+        self.progress.set((n + 1) / self.TOTAL)
+
+    # pages -------------------------------------------------------------------
 
     def show_intro(self):
-        self.step = -1
-        self.heading.config(text="Welcome! Let's set up head control")
-        self.body.config(text="This takes about a minute. HeadMouse will measure how far you can "
-                              "comfortably move your head in each direction and set itself up to suit you.\n\n"
-                              "First, choose how your head is tracked:")
-        self._clear_extra()
+        self._clear()
+        self._set_step(0)
+        self.heading.configure(text="Let's set up head control")
+        self.text.configure(text="About a minute. HeadMouse measures how far you can comfortably move your head "
+                                 "and sets itself up to suit you. First, how should it track your head?")
         self.source = tk.StringVar(value=self.engine.settings.tracking.source)
-        for value, text in (("webcam", "Built-in webcam tracking (recommended - nothing else to run)"),
-                            ("opentrack", "OpenTrack (must be running, with the HeadMouse profile)")):
-            tk.Radiobutton(self.extra, text=text, value=value, variable=self.source, font=_font(12),
-                           command=self._source_changed).pack(anchor="w", pady=2)
-        self.preview = tk.Label(self.extra)
-        self.preview.pack(pady=4)
-        self.photo = None
+        for value, title, desc in (("webcam", "Built-in webcam", "Recommended - nothing else to run"),
+                                   ("opentrack", "OpenTrack", "OpenTrack must be running with the HeadMouse profile")):
+            opt = ctk.CTkFrame(self.content, fg_color=SUBTLE, corner_radius=12)
+            opt.pack(fill="x", pady=4)
+            ctk.CTkRadioButton(opt, text=title, value=value, variable=self.source, font=font(15, "bold"),
+                               command=self._source_changed, fg_color=ACCENT, border_color=MUTED,
+                               hover_color=ACCENT_HOVER, text_color=TEXT).pack(anchor="w", padx=14, pady=(10, 0))
+            ctk.CTkLabel(opt, text=desc, font=font(12), text_color=MUTED).pack(anchor="w", padx=46, pady=(0, 10))
+        self.preview = tk.Label(self.content, bd=0)  # packed when the first picture arrives
         self.engine.set_preview(True)
-        self.next_btn.config(text="Next", state="disabled")
+        self.next_button.configure(text="Next", state="disabled")
 
     def _source_changed(self):
         value = self.source.get()
         if value != self.engine.settings.tracking.source:
-            self.engine.apply_settings(_replace(self.engine.settings, "tracking", source=value))
-            self.main.root.after(500, lambda: self.engine.set_preview(True))
+            self.engine.apply_settings(replace(self.engine.settings, "tracking", source=value))
+            self.top.after(600, lambda: self.engine.set_preview(True))
+
+    def _figure(self, direction):
+        self.figure = tk.Canvas(self.content, width=int(170 * window_scaling(self.top)),
+                                height=int(150 * window_scaling(self.top)), highlightthickness=0, bd=0)
+        self.figure.pack(pady=(4, 0))
+        self.figure_dir = direction
+
+    def _draw_figure(self):
+        if not self.figure:
+            return
+        c = self.figure
+        c.delete("all")
+        c.configure(bg=pick(CARD))
+        w, h = int(c["width"]), int(c["height"])
+        k = w / 170
+        cx, cy, r = w / 2, h / 2, 42 * k
+        dx, dy = self.figure_dir
+        face = pick(SUBTLE_HOVER)
+        c.create_oval(cx - r, cy - r, cx + r, cy + r, fill=face, outline=pick(BORDER), width=2)
+        ox, oy = dx * 18 * k, dy * 14 * k
+        for ex in (-14, 14):
+            c.create_oval(cx + ox + ex * k - 5 * k, cy + oy - 10 * k, cx + ox + ex * k + 5 * k, cy + oy,
+                          fill=pick(TEXT), outline="")
+        c.create_oval(cx + ox - 4 * k, cy + oy + 6 * k, cx + ox + 4 * k, cy + oy + 14 * k, fill=pick(ACCENT),
+                      outline="")
+        if dx or dy:
+            sx, sy = cx + dx * (r + 12 * k), cy + dy * (r + 10 * k)
+            ex_, ey = cx + dx * (r + 40 * k), cy + dy * (r + 26 * k)
+            c.create_line(sx, sy, ex_, ey, fill=pick(ACCENT), width=5 * k, arrow="last",
+                          arrowshape=(14 * k, 16 * k, 6 * k), capstyle="round")
+
+    def _meter(self):
+        frame = ctk.CTkFrame(self.content, fg_color="transparent")
+        frame.pack(fill="x", pady=(10, 0))
+        self.meter = ctk.CTkProgressBar(frame, height=16, progress_color=ACCENT, fg_color=TRACK)
+        self.meter.pack(side="left", fill="x", expand=True)
+        self.meter.set(0)
+        self.meter_label = ctk.CTkLabel(frame, text="0°", font=font(15, "bold"), width=60, text_color=TEXT)
+        self.meter_label.pack(side="right")
 
     def show_neutral(self):
-        self.step = 0
-        self._clear_extra()
-        self.heading.config(text="Look straight at the middle of the screen")
-        self.body.config(text="Sit the way you normally play, relax, and look at the center of the screen.\n"
-                              "Press Start, then hold still until you hear the beep (3 seconds).")
-        self.next_btn.config(text="Start", state="normal")
+        self._clear()
+        self._set_step(1)
+        self.heading.configure(text="Look at the middle of the screen")
+        self.text.configure(text="Sit the way you normally play and relax. Press Start, then hold still "
+                                 "until you hear the beep (3 seconds).")
+        self._figure((0, 0))
+        self.next_button.configure(text="Start", state="normal")
+        self.back.configure(text="Cancel", command=self.close)
+        self.status.configure(text="")
 
     def show_direction(self, index):
-        self.step = index + 1
-        name, axis, head, rest = self.STEPS[index]
-        self.heading.config(text=head)
-        self.body.config(text=f"Press Start, then {head.lower()} {rest}\nKeep holding until you hear the beep "
-                              f"(4 seconds).")
-        self.next_btn.config(text="Start", state="normal")
+        self._clear()
+        self._set_step(index + 2)
+        name, axis, title, vec = self.STEPS[index]
+        self.heading.configure(text=title)
+        self.text.configure(text="As far as is comfortable - no straining. Press Start, turn, and hold "
+                                 "until the beep (4 seconds).")
+        self._figure(vec)
+        self._meter()
+        self.next_button.configure(text="Start", state="normal")
+        self.status.configure(text="")
 
     def show_results(self):
-        self.step = 99
+        self._clear()
+        self._set_step(self.TOTAL - 1)
         new, report, problems, offset = calibration.propose(
             self.engine.settings, self.engine.settings.tracking.source, self.neutral, self.movements)
         self.result = (new, offset)
-        self.heading.config(text="All done!" if not problems else "Done - with some notes")
-        lines = report + ([""] if problems else []) + [f"! {p}" for p in problems]
-        self.body.config(text="\n".join(lines))
-        self._clear_extra()
-        tk.Button(self.extra, text="Try again", font=_font(11), command=self.show_neutral).pack(anchor="w")
-        self.next_btn.config(text="Save and finish", state="normal")
+        self.heading.configure(text="All set!" if not problems else "Almost there")
+        self.text.configure(text="Here's what HeadMouse measured. You can fine-tune it later in Settings.")
+        grid = ctk.CTkFrame(self.content, fg_color="transparent")
+        grid.pack(fill="x")
+        grid.columnconfigure((0, 1), weight=1, uniform="r")
+        for i, name in enumerate(DIRECTIONS):
+            m = self.movements.get(name)
+            d = getattr(new, name)
+            cell = ctk.CTkFrame(grid, fg_color=SUBTLE, corner_radius=12)
+            cell.grid(row=i // 2, column=i % 2, sticky="ew", padx=4, pady=4)
+            ctk.CTkLabel(cell, text=name.title(), font=font(14, "bold"), text_color=TEXT).pack(anchor="w", padx=12,
+                                                                                            pady=(8, 0))
+            ctk.CTkLabel(cell, text=f"range {m.extent:.0f}°  ·  full speed at {d.full_speed_angle:g}°",
+                         font=font(12), text_color=MUTED).pack(anchor="w", padx=12, pady=(0, 8))
+        for line in problems + [r for r in report if "reversed" in r]:
+            ctk.CTkLabel(self.content, text=line, font=font(12), text_color=pick(STATE_COLORS["PAUSED"]),
+                         wraplength=540, justify="left", anchor="w").pack(fill="x", pady=(6, 0))
+        self.back.configure(text="Try again", command=self.show_neutral)
+        self.next_button.configure(text="Save", state="normal")
+
+    # flow --------------------------------------------------------------------
 
     def next(self):
         if self.capturing:
             return
-        if self.step == -1:
+        if self.step == 0:
             self.engine.set_preview(False)
             self.show_neutral()
-        elif self.step == 0:
+        elif self.step == 1:
             self._capture(3.0, 0.5, self._neutral_done)
-        elif 1 <= self.step <= 4:
+        elif 2 <= self.step <= 5:
             self._capture(4.0, 1.5, self._direction_done)
-        elif self.step == 99:
+        else:
             new, offset = self.result
-            new = _replace(new, "general", setup_done=True)
-            self.engine.apply_settings(new)
+            self.engine.apply_settings(replace(new, "general", setup_done=True))
             if new.tracking.source == "opentrack":
                 self.engine.set_offset(offset)
             self.engine.play_sound("done")
@@ -379,477 +1159,86 @@ class WizardWindow(_Child):
 
     def _capture(self, seconds, settle, done):
         self.samples = []
-        self.capturing = (time.monotonic() + settle, time.monotonic() + seconds, done)
-        self.next_btn.config(state="disabled")
+        now = time.monotonic()
+        self.capturing = (now + settle, now + seconds, done)
+        self.next_button.configure(state="disabled")
 
     def _neutral_done(self):
         if len(self.samples) < 10:
-            self.status.config(text="Not enough tracking data - check that your face is tracked, then retry.")
-            self.show_neutral()
+            self.status.configure(text="Not enough tracking data - make sure your face is tracked",
+                                  text_color=DANGER)
+            self.next_button.configure(state="normal")
             return
         self.neutral = calibration.measure_neutral(self.samples)
         self.show_direction(0)
 
     def _direction_done(self):
-        name, axis, *_ = self.STEPS[self.step - 1]
+        name, axis, *_ = self.STEPS[self.step - 2]
         self.movements[name] = calibration.measure_movement(self.samples, self.neutral, axis)
-        index = self.step
-        if index < len(self.STEPS):
-            self.show_direction(index)
+        if self.step - 1 < len(self.STEPS):
+            self.show_direction(self.step - 1)
         else:
             self.show_results()
-
-    def _draw_meter(self, snap):
-        m = self.meter
-        m.delete("all")
-        if snap.raw_angles is None or self.neutral is None or not (1 <= self.step <= 4):
-            return
-        name, axis, *_ = self.STEPS[self.step - 1]
-        center = self.neutral.yaw if axis == 0 else self.neutral.pitch
-        value = abs(snap.raw_angles[axis] - center)
-        width = min(1.0, value / 30.0) * 500
-        m.create_rectangle(10, 8, 510, 26, outline="#bbb")
-        m.create_rectangle(10, 8, 10 + width, 26, fill="#64b5f6", outline="")
-        m.create_text(260, 17, text=f"{value:.1f}°", font=_font(10, True))
 
     def poll(self):
         if not self.alive():
             return
         snap = self.engine.snapshot()
-        ok = snap.tracking == TrackingStatus.OK
-        if self.step == -1:
+        ok = snap.tracking == TrackingStatus.OK and not snap.source_error
+        if self.step == 0:
             if snap.source_error:
-                self.status.config(text=snap.source_error, fg="#c62828")
+                self.status.configure(text=snap.source_error, text_color=DANGER)
             elif ok:
-                self.status.config(text="Tracking is working.", fg="#2e7d32")
+                self.status.configure(text="●  Tracking is working", text_color=STATE_COLORS["ACTIVE"])
             else:
-                self.status.config(text=f"Waiting for tracking... ({snap.source_status})", fg="#c62828")
-            self.next_btn.config(state="normal" if ok else "disabled")
+                self.status.configure(text=f"Waiting for tracking...  ({snap.source_status})", text_color=DANGER)
+            self.next_button.configure(state="normal" if ok else "disabled")
             png = self.engine.preview_png() if snap.source_kind == "webcam" else None
-            if png:
-                self.photo = _png_photo(png)
-                self.preview.config(image=self.photo)
+            if png and self.preview is not None:
+                self.photo = png_photo(png)
+                self.preview.configure(image=self.photo, bg=pick(CARD))
+                if not self.preview.winfo_ismapped():
+                    self.preview.pack(pady=6)
+        self._draw_figure()
+        if self.meter is not None and snap.raw_angles is not None and self.neutral is not None:
+            name, axis, *_ = self.STEPS[self.step - 2]
+            center = self.neutral.yaw if axis == 0 else self.neutral.pitch
+            value = abs(snap.raw_angles[axis] - center)
+            self.meter.set(min(1.0, value / 30.0))
+            self.meter_label.configure(text=f"{value:.0f}°")
         if self.capturing:
             settle_until, end, done = self.capturing
             now = time.monotonic()
             if now >= settle_until and snap.raw_angles is not None:
                 self.samples.append(snap.raw_angles)
-            remaining = end - now
-            self.status.config(text=f"Hold... {max(0, remaining):.0f}" if ok else
-                               "Tracking lost - keep your face visible", fg="#1565c0" if ok else "#c62828")
-            if remaining <= 0:
+            left = end - now
+            self.status.configure(text=f"Hold it...  {max(0, left):.0f}" if ok else "Keep your face in view",
+                                  text_color=ACCENT if ok else DANGER)
+            if left <= 0:
                 self.capturing = None
                 self.engine.play_sound("tracking_ok")
-                self.status.config(text="")
+                self.status.configure(text="")
                 done()
-        self._draw_meter(snap)
         self.top.after(30, self.poll)
 
 
-class SensitivityWindow(_Child):
-    title = "HeadMouse sensitivity"
-    SLIDERS = [  # field, label, from, to, resolution
-        ("deadzone", "Dead zone (degrees with no movement)", 0.0, 10.0, 0.1),
-        ("full_speed_angle", "Head angle for full speed (degrees)", 3.0, 45.0, 0.5),
-        ("min_speed", "Slowest speed (°/s, just past the dead zone)", 0.0, 60.0, 0.5),
-        ("max_speed", "Top speed (°/s)", 10.0, 360.0, 5.0),
-        ("curve", "Curve (1 = even, higher = finer control near center)", 0.5, 4.0, 0.05),
-    ]
-    PAIRS = {"right": "left", "left": "right", "up": "down", "down": "up"}
-
-    def __init__(self, main):
-        super().__init__(main)
-        self.original = self.engine.settings
-        self.work = self.engine.settings
-        self.vars = {}
-        self.canvases = {}
-        self._pending = None
-        nb = ttk.Notebook(self.top)
-        nb.pack(fill="both", expand=True)
-        for name in DIRECTION_NAMES:
-            frame = tk.Frame(nb, padx=8, pady=8)
-            nb.add(frame, text=f"  {name.title()}  ")
-            self._direction_tab(frame, name)
-        other = tk.Frame(nb, padx=8, pady=8)
-        nb.add(other, text="  Other  ")
-        self._other_tab(other)
-        buttons = tk.Frame(self.top)
-        buttons.pack(fill="x", pady=(10, 0))
-        tk.Button(buttons, text="Cancel changes", font=_font(11), command=self.cancel).pack(side="left")
-        tk.Button(buttons, text="Save", font=_font(13, True), width=12, command=self.save).pack(side="right")
-        self.poll()
-
-    def _direction_tab(self, frame, name):
-        d = getattr(self.work, name)
-        if d.points:
-            tk.Label(frame, text="This direction uses a custom table of points from the settings file.",
-                     font=_font(11), wraplength=420).pack(anchor="w")
-            tk.Button(frame, text="Use sliders instead", font=_font(11),
-                      command=lambda: self._drop_points(name, frame)).pack(anchor="w", pady=6)
-            return
-        for field, label, lo, hi, res in self.SLIDERS:
-            var = tk.DoubleVar(value=getattr(d, field))
-            self.vars[(name, field)] = var
-            tk.Label(frame, text=label, font=_font(10)).pack(anchor="w")
-            tk.Scale(frame, variable=var, from_=lo, to=hi, resolution=res, orient="horizontal", length=420,
-                     font=_font(9), command=lambda _v, n=name: self._changed(n)).pack(anchor="w")
-        canvas = tk.Canvas(frame, width=420, height=170, bg="#fafafa", highlightthickness=1,
-                           highlightbackground="#ccc")
-        canvas.pack(pady=(6, 4))
-        self.canvases[name] = canvas
-        pair = self.PAIRS[name]
-        tk.Button(frame, text=f"Copy these settings to {pair.title()}", font=_font(10),
-                  command=lambda: self._copy(name, pair)).pack(anchor="w")
-
-    def _drop_points(self, name, frame):
-        self.work = _replace(self.work, name, points=[])
-        for w in frame.winfo_children():
-            w.destroy()
-        self._direction_tab(frame, name)
-        self._schedule()
-
-    def _other_tab(self, frame):
-        w = self.work
-        self.other = {}
-
-        def row(label, var, widget_factory):
-            tk.Label(frame, text=label, font=_font(10)).pack(anchor="w", pady=(6, 0))
-            widget_factory(var).pack(anchor="w")
-
-        def scale(lo, hi, res):
-            return lambda var: tk.Scale(frame, variable=var, from_=lo, to=hi, resolution=res,
-                                        orient="horizontal", length=420, font=_font(9),
-                                        command=lambda _v: self._other_changed())
-
-        self.other["precision"] = tk.DoubleVar(value=w.motion.precision_speed_factor)
-        row("Precision mode speed (0.2 = 80% slower)", self.other["precision"], scale(0.05, 1.0, 0.05))
-        self.other["webcam_smooth"] = tk.DoubleVar(value=w.webcam.smoothing_min_cutoff)
-        row("Webcam steadiness (lower = steadier, higher = quicker)", self.other["webcam_smooth"],
-            scale(0.2, 4.0, 0.1))
-        self.other["volume"] = tk.DoubleVar(value=w.sounds.volume)
-        row("Sound volume (0 = off)", self.other["volume"], scale(0.0, 1.0, 0.05))
-        tk.Button(frame, text="Test sound", font=_font(10),
-                  command=lambda: self.engine.play_sound("enabled")).pack(anchor="w")
-        self.other["invert"] = tk.BooleanVar(value=w.mouse.invert_vertical)
-        tk.Checkbutton(frame, text="Reverse up/down (look up = camera down)", variable=self.other["invert"],
-                       font=_font(10), command=self._other_changed).pack(anchor="w", pady=(8, 0))
-        self.other["auto"] = tk.BooleanVar(value=w.general.auto_enable_in_game)
-        tk.Checkbutton(frame, text="Turn on automatically when the game window is active",
-                       variable=self.other["auto"], font=_font(10),
-                       command=self._other_changed).pack(anchor="w")
-        keys = tk.LabelFrame(frame, text="Keys (e.g. F9, PAUSE, SCROLLLOCK, NUMPAD0)", font=_font(10),
-                             padx=6, pady=4)
-        keys.pack(fill="x", pady=(8, 0))
-        for i, (field, label) in enumerate((("pause_hold", "Freeze (hold)"), ("enable_toggle", "On/off"),
-                                            ("precision_hold", "Precision (hold)"), ("recenter", "Re-center"))):
-            var = tk.StringVar(value=getattr(w.keys, field))
-            self.other[f"key_{field}"] = var
-            tk.Label(keys, text=label, font=_font(10)).grid(row=i // 2, column=(i % 2) * 2, sticky="w", padx=4)
-            tk.Entry(keys, textvariable=var, width=10, font=_font(10)).grid(row=i // 2, column=(i % 2) * 2 + 1,
-                                                                           padx=4, pady=2)
-
-    def _copy(self, src, dst):
-        for field, *_ in self.SLIDERS:
-            if (dst, field) in self.vars:
-                self.vars[(dst, field)].set(self.vars[(src, field)].get())
-        self._changed(dst)
-
-    def _collect_direction(self, name):
-        d = getattr(self.work, name)
-        if any((name, f) not in self.vars for f, *_ in self.SLIDERS):
-            return d  # tab still being built
-        values = {f: round(self.vars[(name, f)].get(), 3) for f, *_ in self.SLIDERS}
-        if values["full_speed_angle"] <= values["deadzone"]:
-            values["full_speed_angle"] = values["deadzone"] + 0.5
-            self.vars[(name, "full_speed_angle")].set(values["full_speed_angle"])
-        if values["min_speed"] > values["max_speed"]:
-            values["min_speed"] = values["max_speed"]
-            self.vars[(name, "min_speed")].set(values["min_speed"])
-        return dataclasses.replace(d, **values)
-
-    def _changed(self, name):
-        self.work = dataclasses.replace(self.work, **{name: self._collect_direction(name)})
-        self._schedule()
-
-    def _other_changed(self):
-        o = self.other
-        w = self.work
-        w = _replace(w, "motion", precision_speed_factor=round(o["precision"].get(), 3))
-        w = _replace(w, "webcam", smoothing_min_cutoff=round(o["webcam_smooth"].get(), 3))
-        w = _replace(w, "sounds", volume=round(o["volume"].get(), 3))
-        w = _replace(w, "mouse", invert_vertical=o["invert"].get())
-        w = _replace(w, "general", auto_enable_in_game=o["auto"].get())
-        self.work = w
-        self._schedule()
-
-    def _schedule(self):
-        """Try the new values live (not saved) shortly after the last slider move."""
-        if self._pending:
-            self.top.after_cancel(self._pending)
-        self._pending = self.top.after(250, lambda: self.engine.apply_settings(self.work, save=False))
-
-    def _keys_ok(self):
-        changes = {}
-        for field in ("pause_hold", "enable_toggle", "precision_hold", "recenter"):
-            value = self.other[f"key_{field}"].get().strip().upper()
-            try:
-                key_code(value)
-            except ValueError:
-                messagebox.showerror("HeadMouse", f"'{value}' is not a key name I know.", parent=self.top)
-                return None
-            changes[field] = value
-        candidate = _replace(self.work, "keys", **changes)
-        try:
-            config.validate(candidate)
-        except config.SettingsError as e:
-            messagebox.showerror("HeadMouse", str(e), parent=self.top)
-            return None
-        return candidate
-
-    def save(self):
-        candidate = self._keys_ok()
-        if candidate is None:
-            return
-        if self._pending:
-            self.top.after_cancel(self._pending)
-        self.engine.apply_settings(candidate, save=True)
-        self.top.destroy()
-
-    def cancel(self):
-        if self._pending:
-            self.top.after_cancel(self._pending)
-        self.engine.apply_settings(self.original, save=False)
-        self.top.destroy()
-
-    close = cancel
-
-    def _plot(self, name, canvas, snap):
-        d = getattr(self.work, name)
-        curve = DirectionCurve(d)
-        c = canvas
-        c.delete("all")
-        w, h = int(c["width"]), int(c["height"])
-        x_max = max(20.0, d.full_speed_angle * 1.4) if not d.points else max(p[0] for p in d.points) * 1.4
-        y_max = max(10.0, max(curve.speed(a / 10) for a in range(int(x_max * 10) + 1)) * 1.1)
-        left, bottom = 40, h - 22
-        px = lambda a: left + a / x_max * (w - left - 10)
-        py = lambda v: bottom - v / y_max * (bottom - 10)
-        c.create_line(left, bottom, w - 10, bottom, fill="#999")
-        c.create_line(left, bottom, left, 8, fill="#999")
-        for a in range(0, int(x_max) + 1, 5):
-            c.create_text(px(a), bottom + 10, text=f"{a}°", font=_font(8), fill="#666")
-        for v in (0, y_max / 2, y_max):
-            c.create_text(left - 4, py(v), text=f"{v:.0f}", anchor="e", font=_font(8), fill="#666")
-        c.create_text(left + 4, 10, text="°/s", anchor="nw", font=_font(8), fill="#666")
-        pts = []
-        for i in range(0, 201):
-            a = x_max * i / 200
-            pts += [px(a), py(curve.speed(a))]
-        c.create_line(*pts, fill="#1565c0", width=2)
-        c.create_line(px(d.deadzone), bottom, px(d.deadzone), 8, fill="#81c784", dash=(3, 3))
-        if snap.tracking == TrackingStatus.OK:
-            value = {"right": snap.yaw, "left": -snap.yaw, "up": snap.pitch, "down": -snap.pitch}[name]
-            if value > 0:
-                a = min(value, x_max)
-                c.create_oval(px(a) - 5, py(curve.speed(a)) - 5, px(a) + 5, py(curve.speed(a)) + 5,
-                              fill="#e53935", outline="white")
-
-    def poll(self):
-        if not self.alive():
-            return
-        snap = self.engine.snapshot()
-        for name, canvas in self.canvases.items():
-            if canvas.winfo_exists():
-                self._plot(name, canvas, snap)
-        self.top.after(80, self.poll)
-
-
-class CalibrationWindow(_Child):
-    title = "Game calibration"
-
-    def __init__(self, main):
-        super().__init__(main)
-        self.engine.calibration_mode = True
-        self.engine.set_hold("calibration", True)  # head must not move the camera meanwhile
-        s = self.engine.settings
-        k = s.keys
-        tk.Label(self.top, text="Make HeadMouse's speeds match the game", font=_font(15, True)).pack(anchor="w")
-        tk.Label(self.top, font=_font(11), justify="left", wraplength=480, text=(
-            "1. Start Enshrouded and set its mouse sensitivity the way you like it.\n"
-            f"2. In the game, face something easy to recognise and press {k.calibrate_turn}\n"
-            f"    (or use the button below - you get 5 seconds to click into the game).\n"
-            "3. The camera should turn exactly ONE full circle and stop facing the same thing.\n"
-            "4. If it didn't, type how far it actually turned and press 'Correct it'. Repeat.")).pack(
-            anchor="w", pady=6)
-        row = tk.Frame(self.top)
-        row.pack(fill="x", pady=4)
-        tk.Label(row, text="Mouse counts for one full turn:", font=_font(11)).pack(side="left")
-        self.counts = tk.StringVar(value=f"{s.mouse.counts_per_360:g}")
-        tk.Label(row, textvariable=self.counts, font=_font(11, True)).pack(side="left", padx=6)
-        self.turn_btn = tk.Button(self.top, text="Test turn in 5 seconds", font=_font(12, True),
-                                  command=self.countdown)
-        self.turn_btn.pack(anchor="w", pady=6)
-        row2 = tk.Frame(self.top)
-        row2.pack(fill="x", pady=4)
-        tk.Label(row2, text="It actually turned about", font=_font(11)).pack(side="left")
-        self.degrees = tk.StringVar(value="360")
-        tk.Entry(row2, textvariable=self.degrees, width=6, font=_font(11)).pack(side="left", padx=4)
-        tk.Label(row2, text="degrees", font=_font(11)).pack(side="left")
-        tk.Button(row2, text="Correct it", font=_font(11), command=self.correct).pack(side="left", padx=8)
-        tk.Label(self.top, font=_font(9), fg="#555", justify="left", wraplength=480, text=(
-            "Tip: one and a half turns = 540 degrees, three quarters = 270. "
-            f"Hold {k.pause_hold} to stop a test turn.")).pack(anchor="w", pady=(6, 0))
-        tk.Button(self.top, text="Done", font=_font(12), width=10, command=self.close).pack(anchor="e", pady=(8, 0))
-
-    def countdown(self, n=5):
-        if not self.alive():
-            return
-        if n == 0:
-            self.turn_btn.config(text="Test turn in 5 seconds", state="normal")
-            self.engine.start_test_turn()
-            return
-        self.turn_btn.config(text=f"Turning in {n}...", state="disabled")
-        self.top.after(1000, lambda: self.countdown(n - 1))
-
-    def correct(self):
-        try:
-            turned = float(self.degrees.get())
-            if not 10 <= turned <= 3600:
-                raise ValueError
-        except ValueError:
-            messagebox.showerror("HeadMouse", "Type the number of degrees it turned, e.g. 400.", parent=self.top)
-            return
-        s = self.engine.settings
-        new_counts = round(s.mouse.counts_per_360 * 360.0 / turned, 1)
-        self.engine.apply_settings(_replace(s, "mouse", counts_per_360=new_counts))
-        self.counts.set(f"{new_counts:g}")
-        self.degrees.set("360")
-
-    def close(self):
-        self.engine.calibration_mode = False
-        self.engine.set_hold("calibration", False)
-        super().close()
-
-
-class TrackerWindow(_Child):
-    title = "Tracker and OpenTrack"
-
-    def __init__(self, main):
-        super().__init__(main)
-        s = self.engine.settings
-        tk.Label(self.top, text="How is your head tracked?", font=_font(15, True)).pack(anchor="w")
-        self.source = tk.StringVar(value=s.tracking.source)
-        for value, text in (("webcam", "Built-in webcam tracking (recommended)"),
-                            ("opentrack", "OpenTrack")):
-            tk.Radiobutton(self.top, text=text, value=value, variable=self.source, font=_font(12),
-                           command=self._apply_source).pack(anchor="w")
-        self.status = tk.Label(self.top, font=_font(10), fg="#444", wraplength=480, justify="left")
-        self.status.pack(anchor="w", pady=(4, 8))
-
-        cam = tk.LabelFrame(self.top, text="Webcam", font=_font(11), padx=8, pady=6)
-        cam.pack(fill="x")
-        tk.Label(cam, text="Camera number (try 1, 2 if the wrong camera is used):", font=_font(10)).pack(
-            side="left")
-        self.camera = tk.Spinbox(cam, from_=0, to=9, width=4, font=_font(11), command=self._apply_camera)
-        self.camera.delete(0, "end")
-        self.camera.insert(0, str(s.webcam.camera_index))
-        self.camera.pack(side="left", padx=6)
-
-        ot = tk.LabelFrame(self.top, text="OpenTrack", font=_font(11), padx=8, pady=6)
-        ot.pack(fill="x", pady=(8, 0))
-        self.folder = None
-        for folder in opentrack_setup.profile_folders(s.opentrack.opentrack_exe):
-            if folder.is_dir():
-                self.folder = folder
-                break
-        profiles = opentrack_setup.list_profiles(self.folder) if self.folder else []
-        profiles = [p for p in profiles if p != opentrack_setup.PROFILE_NAME] or profiles
-        tk.Label(ot, font=_font(10), justify="left", wraplength=470, text=(
-            "Creates a profile called 'HeadMouse' as a copy of one of your profiles (your camera and "
-            "tracker settings are kept), with the output set to HeadMouse and the yaw/pitch curves "
-            "set to 1:1. Your existing profiles are not changed.")).pack(anchor="w")
-        row = tk.Frame(ot)
-        row.pack(fill="x", pady=4)
-        tk.Label(row, text="Copy from:", font=_font(10)).pack(side="left")
-        current = opentrack_setup.current_profile()
-        self.profile = tk.StringVar(value=current if current in profiles else (profiles[0] if profiles else ""))
-        ttk.Combobox(row, textvariable=self.profile, values=profiles, state="readonly", width=24).pack(
-            side="left", padx=6)
-        tk.Button(ot, text="Create HeadMouse profile", font=_font(11, True), command=self.make_profile).pack(
-            anchor="w", pady=4)
-        if self.folder is None:
-            tk.Label(ot, text="No OpenTrack profiles found (is OpenTrack installed and run once?).",
-                     font=_font(10), fg="#c62828").pack(anchor="w")
-        row2 = tk.Frame(ot)
-        row2.pack(fill="x", pady=(4, 0))
-        tk.Button(row2, text="Start OpenTrack now", font=_font(10), command=self.launch).pack(side="left")
-        self.autolaunch = tk.BooleanVar(value=s.opentrack.launch_opentrack)
-        tk.Checkbutton(row2, text="Start OpenTrack with HeadMouse", variable=self.autolaunch, font=_font(10),
-                       command=self._apply_autolaunch).pack(side="left", padx=8)
-        tk.Button(self.top, text="Close", font=_font(12), width=10, command=self.close).pack(anchor="e", pady=(10, 0))
-        self.poll()
-
-    def _apply_source(self):
-        self.engine.apply_settings(_replace(self.engine.settings, "tracking", source=self.source.get()))
-
-    def _apply_camera(self):
-        try:
-            index = int(self.camera.get())
-        except ValueError:
-            return
-        self.engine.apply_settings(_replace(self.engine.settings, "webcam", camera_index=index))
-
-    def _apply_autolaunch(self):
-        self.engine.apply_settings(_replace(self.engine.settings, "opentrack",
-                                            launch_opentrack=self.autolaunch.get()))
-
-    def make_profile(self):
-        if self.folder is None:
-            messagebox.showerror("HeadMouse", "No OpenTrack profile folder was found.", parent=self.top)
-            return
-        try:
-            dest, backup = opentrack_setup.make_headmouse_profile(
-                self.folder, self.profile.get(), self.engine.settings.opentrack.port)
-        except OSError as e:
-            messagebox.showerror("HeadMouse", f"Could not create the profile: {e}", parent=self.top)
-            return
-        note = f"\n\nThe previous HeadMouse profile was backed up as {backup.name}." if backup else ""
-        messagebox.showinfo("HeadMouse", f"Created {dest}.{note}\n\nIn OpenTrack, choose 'HeadMouse' in the "
-                                         "profile list, then press Start.", parent=self.top)
-
-    def launch(self):
-        messagebox.showinfo("HeadMouse", opentrack_setup.launch_if_needed(
-            self.engine.settings.opentrack.opentrack_exe), parent=self.top)
-
-    def poll(self):
-        if not self.alive():
-            return
-        snap = self.engine.snapshot()
-        ok = snap.tracking == TrackingStatus.OK
-        self.status.config(text=f"Status: {'tracking OK' if ok else snap.source_status}",
-                           fg="#2e7d32" if ok else "#c62828")
-        self.top.after(250, self.poll)
-
-
-def _dpi_aware():
-    if sys.platform == "win32":
-        try:
-            import ctypes
-            ctypes.windll.shcore.SetProcessDpiAwareness(1)
-        except (AttributeError, OSError):
-            pass
+def _initial_theme(settings_path):
+    try:
+        return config.load(settings_path)[0].general.theme
+    except Exception:
+        return "system"
 
 
 def run_gui(settings_path, base_dir, dry_run=False, engine=None):
-    _dpi_aware()
-    root = tk.Tk()
+    ctk.set_appearance_mode(_initial_theme(settings_path))
+    ctk.set_default_color_theme("blue")
+    root = ctk.CTk()
     engine = engine or Engine(settings_path, base_dir, dry_run=dry_run)
     try:
         engine.start()
     except config.SettingsError as e:
         root.withdraw()
-        messagebox.showerror("HeadMouse", f"There is a problem in the settings file:\n\n{e}\n\n"
-                                          f"{settings_path}")
+        messagebox.showerror("HeadMouse", f"There is a problem in the settings file:\n\n{e}\n\n{settings_path}")
         root.destroy()
         return 1
     MainWindow(root, engine)

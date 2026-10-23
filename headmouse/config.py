@@ -64,6 +64,7 @@ class GeneralSettings:
     auto_enable_in_game: bool = True
     only_move_in_game_window: bool = False
     always_on_top: bool = False
+    theme: str = "system"
     show_status: bool = True
     setup_done: bool = False
 
@@ -232,6 +233,8 @@ def _validate_direction(name, d):
 def validate(s):
     _check(s.tracking.source in TRACKING_SOURCES,
            f"[tracking] source must be one of: {', '.join(TRACKING_SOURCES)}")
+    _check(s.general.theme in ("system", "light", "dark"),
+           "[general] theme must be \"system\", \"light\" or \"dark\"")
     _check(s.webcam.camera_index >= 0, "[webcam] camera_index must be 0 or more")
     _check(s.webcam.frame_width > 0 and s.webcam.frame_height > 0 and s.webcam.fps > 0,
            "[webcam] frame_width, frame_height and fps must be more than 0")

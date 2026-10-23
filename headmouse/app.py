@@ -206,5 +206,13 @@ def main(argv=None):
         return run_calibrate(args.settings)
     if args.console:
         return run_console(args.settings, args.dry_run)
-    from .gui import run_gui
+    try:
+        from .gui import run_gui
+    except ModuleNotFoundError as e:  # customtkinter not installed yet
+        import tkinter
+        from tkinter import messagebox
+        tkinter.Tk().withdraw()
+        messagebox.showerror("HeadMouse", f"Part of HeadMouse is not installed yet ({e.name}).\n\n"
+                                          "Please run Setup.bat in the HeadMouse folder.")
+        return 1
     return run_gui(args.settings, base_dir(), args.dry_run)
