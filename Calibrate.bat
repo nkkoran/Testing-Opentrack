@@ -1,5 +1,5 @@
 @echo off
-rem Calibration: sends exact 360-degree turns to find counts_per_360.
+rem Console calibration (the window's Game calibration button does the same).
 cd /d "%~dp0"
-py run_headmouse.py --calibrate
+py -3 run_headmouse.py --calibrate
 pause

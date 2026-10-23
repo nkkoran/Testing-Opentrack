@@ -1,17 +1,29 @@
 # =============================================================================
 #  HeadMouse settings
 # =============================================================================
-#  Edit with Notepad and SAVE. A running HeadMouse picks up changes within about
-#  one second - no restart needed. If you make a typing mistake, HeadMouse prints
-#  the problem and keeps using the previous settings.
+#  Most of these can be changed from the HeadMouse window (Sensitivity, Setup
+#  wizard, Game calibration), which saves them here for you.
 #
-#  Angles are in degrees of head rotation (as reported by OpenTrack).
+#  You can also edit this file with Notepad and SAVE. A running HeadMouse picks
+#  up changes within about one second - no restart needed. If you make a typing
+#  mistake, HeadMouse shows the problem and keeps using the previous settings.
+#
+#  Angles are in degrees of head rotation.
 #  Speeds are in degrees per second of camera rotation in the game, which is
 #  only accurate after [mouse] counts_per_360 has been calibrated.
 #
 #  To see the speed each direction produces at each head angle, run
-#  "Show speed curves.bat" (or: py run_headmouse.py --curves).
+#  "Show speed curves.bat", or look at the graphs in the Sensitivity window.
 # =============================================================================
+
+
+# -----------------------------------------------------------------------------
+#  Where head angles come from
+#    "webcam"    = HeadMouse reads the webcam itself (no OpenTrack needed)
+#    "opentrack" = OpenTrack sends angles over UDP (OpenTrack must be running)
+# -----------------------------------------------------------------------------
+[tracking]
+source = "webcam"
 
 
 # -----------------------------------------------------------------------------
@@ -75,7 +87,7 @@ pause_hold = "F9"        # HOLD: camera freezes immediately; release to resume
 enable_toggle = "F10"    # press: head control on / off
 recenter = "F8"          # press while looking straight ahead: sets neutral position
 precision_hold = "F7"    # HOLD: slow precision mode (bow aiming)
-calibrate_turn = "F6"    # only used in calibration mode
+calibrate_turn = "F6"    # test turn, while the Game calibration window is open
 
 
 # -----------------------------------------------------------------------------
@@ -83,7 +95,7 @@ calibrate_turn = "F6"    # only used in calibration mode
 # -----------------------------------------------------------------------------
 [mouse]
 # Mouse counts that turn the game camera exactly 360 degrees. Depends on the
-# game's mouse sensitivity setting. Find it with "Calibrate.bat".
+# game's mouse sensitivity setting. Use the "Game calibration" button.
 counts_per_360 = 4000.0
 # Vertical counts per degree relative to horizontal (1.0 = same).
 vertical_scale = 1.0
@@ -99,7 +111,7 @@ calibrate_turn_seconds = 3.0
 #  Motion behaviour
 # -----------------------------------------------------------------------------
 [motion]
-# Extra smoothing of head angles, in seconds (0 = off). OpenTrack's own filter
+# Extra smoothing of head angles, in seconds (0 = off). The tracker's own filter
 # does most of the smoothing; raise this a little if movement looks jittery.
 smoothing_seconds = 0.04
 # Once moving, keep moving (at min_speed) until the head is this many degrees
@@ -120,10 +132,10 @@ precision_speed_factor = 0.2
 #  Tracking safety: when to stop movement because tracking can't be trusted
 # -----------------------------------------------------------------------------
 [safety]
-# Stop if OpenTrack sends nothing for this many seconds.
+# Stop if the tracker sends nothing for this many seconds (e.g. face not seen).
 no_data_timeout = 0.25
-# Stop if OpenTrack keeps sending exactly the same numbers for this many
-# seconds (what usually happens when it loses your face). 0 = off.
+# Stop if the tracker keeps sending exactly the same numbers for this many
+# seconds (what OpenTrack usually does when it loses your face). 0 = off.
 # If movement stops while you hold your head perfectly still, raise this.
 frozen_data_timeout = 1.0
 # A head angle jump bigger than this between two updates is treated as a
@@ -143,16 +155,65 @@ max_valid_pitch = 90.0
 start_enabled = false
 # Mouse updates per second.
 output_rate_hz = 125.0
-# Only move the mouse while the active window's title contains this text,
-# e.g. "Enshrouded". Leave empty ("") to work in any window (needed for the
-# desktop test).
-only_when_window_title_contains = ""
-# Show the live status line.
+# Text in the game's window title. Used by the two settings below.
+game_window_title = "Enshrouded"
+# true = head control switches ON when the game window becomes active and OFF
+# when you switch away from it. enable_toggle still works at any time.
+auto_enable_in_game = true
+# true = never move the mouse unless the game window is active (the desktop
+# test then does nothing).
+only_move_in_game_window = false
+# Keep the HeadMouse window on top of other windows.
+always_on_top = false
+# Show the live status line (console mode).
 show_status = true
+# Set by the setup wizard. false = the wizard opens when HeadMouse starts.
+setup_done = false
 
 
 # -----------------------------------------------------------------------------
-#  OpenTrack connection (must match OpenTrack's "UDP over network" output)
+#  Sound cues (so you know what HeadMouse is doing without looking)
+# -----------------------------------------------------------------------------
+[sounds]
+enabled = true
+# 0.0 (silent) to 1.0 (loudest)
+volume = 0.5
+# Rising tone = head control on, falling tone = off.
+on_enable_disable = true
+# Low double tone = tracking lost (movement stopped), short high tone = back.
+on_tracking_lost = true
+# Click when the pause key is pressed (off by default - the pedal is used a lot).
+on_pause = false
+
+
+# -----------------------------------------------------------------------------
+#  Built-in webcam tracking (used when [tracking] source = "webcam")
+# -----------------------------------------------------------------------------
+[webcam]
+# 0 = first camera. Try 1, 2 ... if the wrong camera is used.
+camera_index = 0
+frame_width = 640
+frame_height = 480
+fps = 30
+# Smoothing: lower min_cutoff = steadier but slower to react; higher beta =
+# less lag during fast head turns.
+smoothing_min_cutoff = 1.0
+smoothing_beta = 0.05
+# Head angles when looking straight at the screen. Set by the setup wizard
+# and by the re-center key.
+neutral_yaw = 0.0
+neutral_pitch = 0.0
+# Set automatically by the setup wizard.
+yaw_right_is_positive = true
+pitch_up_is_positive = true
+# Leave empty to use face_landmarker.task next to HeadMouse (downloaded
+# automatically the first time if missing).
+model_path = ""
+
+
+# -----------------------------------------------------------------------------
+#  OpenTrack (used when [tracking] source = "opentrack"). Must match OpenTrack's
+#  "UDP over network" output - the "Set up OpenTrack profile" button does that.
 # -----------------------------------------------------------------------------
 [opentrack]
 listen_address = "127.0.0.1"
@@ -161,3 +222,7 @@ port = 4242
 yaw_right_is_positive = true
 # Set to false if the monitor shows DOWN when you look up.
 pitch_up_is_positive = true
+# Start OpenTrack automatically when HeadMouse starts (if it isn't running).
+launch_opentrack = true
+# Full path to opentrack.exe. Empty = look in the usual install folders.
+opentrack_exe = ""

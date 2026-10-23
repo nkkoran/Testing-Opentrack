@@ -13,9 +13,10 @@ from .curves import DirectionCurve
 def orient(raw, settings, offset=(0.0, 0.0)):
     """Convert tracker angles to (yaw, pitch) where right and up are positive."""
     yaw, pitch = raw
-    if not settings.opentrack.yaw_right_is_positive:
+    source = settings.source_settings()
+    if not source.yaw_right_is_positive:
         yaw = -yaw
-    if not settings.opentrack.pitch_up_is_positive:
+    if not source.pitch_up_is_positive:
         pitch = -pitch
     return yaw - offset[0], pitch - offset[1]
 

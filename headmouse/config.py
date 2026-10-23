@@ -6,11 +6,35 @@ The section and field names below match the settings file exactly.
 
 import dataclasses
 import math
+import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .keys import key_code
+
+
+TRACKING_SOURCES = ("webcam", "opentrack")
+
+
+@dataclass
+class TrackingSettings:
+    source: str = "webcam"
+
+
+@dataclass
+class WebcamSettings:
+    camera_index: int = 0
+    frame_width: int = 640
+    frame_height: int = 480
+    fps: int = 30
+    smoothing_min_cutoff: float = 1.0
+    smoothing_beta: float = 0.05
+    neutral_yaw: float = 0.0
+    neutral_pitch: float = 0.0
+    yaw_right_is_positive: bool = True
+    pitch_up_is_positive: bool = True
+    model_path: str = ""
 
 
 @dataclass
@@ -19,6 +43,8 @@ class OpenTrackSettings:
     port: int = 4242
     yaw_right_is_positive: bool = True
     pitch_up_is_positive: bool = True
+    launch_opentrack: bool = True
+    opentrack_exe: str = ""
 
 
 @dataclass
@@ -34,8 +60,21 @@ class KeySettings:
 class GeneralSettings:
     start_enabled: bool = False
     output_rate_hz: float = 125.0
-    only_when_window_title_contains: str = ""
+    game_window_title: str = "Enshrouded"
+    auto_enable_in_game: bool = True
+    only_move_in_game_window: bool = False
+    always_on_top: bool = False
     show_status: bool = True
+    setup_done: bool = False
+
+
+@dataclass
+class SoundSettings:
+    enabled: bool = True
+    volume: float = 0.5
+    on_enable_disable: bool = True
+    on_tracking_lost: bool = True
+    on_pause: bool = False
 
 
 @dataclass
@@ -88,9 +127,12 @@ def _vertical():
 
 @dataclass
 class Settings:
+    tracking: TrackingSettings = field(default_factory=TrackingSettings)
+    webcam: WebcamSettings = field(default_factory=WebcamSettings)
     opentrack: OpenTrackSettings = field(default_factory=OpenTrackSettings)
     keys: KeySettings = field(default_factory=KeySettings)
     general: GeneralSettings = field(default_factory=GeneralSettings)
+    sounds: SoundSettings = field(default_factory=SoundSettings)
     mouse: MouseSettings = field(default_factory=MouseSettings)
     motion: MotionSettings = field(default_factory=MotionSettings)
     safety: SafetySettings = field(default_factory=SafetySettings)
@@ -98,6 +140,10 @@ class Settings:
     left: DirectionSettings = field(default_factory=_horizontal)
     up: DirectionSettings = field(default_factory=_vertical)
     down: DirectionSettings = field(default_factory=_vertical)
+
+    def source_settings(self):
+        """The [webcam] or [opentrack] section for the tracker in use."""
+        return getattr(self, self.tracking.source)
 
     def key(self, name):
         """Virtual-key code for one of the [keys] entries, or None if disabled."""
@@ -184,7 +230,15 @@ def _validate_direction(name, d):
 
 
 def validate(s):
+    _check(s.tracking.source in TRACKING_SOURCES,
+           f"[tracking] source must be one of: {', '.join(TRACKING_SOURCES)}")
+    _check(s.webcam.camera_index >= 0, "[webcam] camera_index must be 0 or more")
+    _check(s.webcam.frame_width > 0 and s.webcam.frame_height > 0 and s.webcam.fps > 0,
+           "[webcam] frame_width, frame_height and fps must be more than 0")
+    _check(s.webcam.smoothing_min_cutoff > 0, "[webcam] smoothing_min_cutoff must be more than 0")
+    _check(s.webcam.smoothing_beta >= 0, "[webcam] smoothing_beta must be 0 or more")
     _check(0 < s.opentrack.port < 65536, "[opentrack] port must be between 1 and 65535")
+    _check(0 <= s.sounds.volume <= 1, "[sounds] volume must be between 0 and 1")
     used = {}
     for f in dataclasses.fields(KeySettings):
         try:
@@ -223,3 +277,89 @@ def load(path):
     except tomllib.TOMLDecodeError as e:
         raise SettingsError(f"{path.name}: {e}") from None
     return from_dict(data)
+
+
+# --- Saving -----------------------------------------------------------------
+# tomllib can only read, so values are written by editing the existing file text
+# in place. Comments, ordering and layout stay exactly as they were.
+
+_SECTION_RE = re.compile(r"^\s*\[([A-Za-z0-9_.-]+)\]\s*(#.*)?$")
+_VALUE_RE = r'(?:"(?:[^"\\]|\\.)*"|\[.*\]|[^#\n]*?)'
+
+
+def format_value(value):
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        text = f"{value:.4f}".rstrip("0")
+        return text + "0" if text.endswith(".") else text
+    if isinstance(value, str):
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
+    if isinstance(value, list):
+        return "[" + ", ".join(format_value(v) for v in value) + "]"
+    raise TypeError(f"cannot write {value!r} to the settings file")
+
+
+def update_text(text, updates):
+    """Return settings-file text with `updates` ({section: {key: value}}) applied."""
+    lines = text.splitlines()
+    pending = {sec: dict(vals) for sec, vals in updates.items()}
+    section = None
+    section_end = {}  # section -> index after its last non-blank line
+    for i, line in enumerate(lines):
+        m = _SECTION_RE.match(line)
+        if m:
+            section = m.group(1)
+            section_end.setdefault(section, i + 1)
+            continue
+        if section is None:
+            continue
+        if line.strip():
+            section_end[section] = i + 1
+        todo = pending.get(section)
+        if not todo:
+            continue
+        for key in list(todo):
+            km = re.match(rf"^(\s*{re.escape(key)}\s*=\s*)({_VALUE_RE})(\s*(#.*)?)$", line)
+            if km:
+                lines[i] = km.group(1) + format_value(todo.pop(key)) + km.group(3)
+                break
+    # Keys not found: add them at the end of their section (or a new section).
+    inserts = []
+    for sec, todo in pending.items():
+        if not todo:
+            continue
+        new_lines = [f"{k} = {format_value(v)}" for k, v in todo.items()]
+        if sec in section_end:
+            inserts.append((section_end[sec], new_lines))
+        else:
+            lines.extend(["", f"[{sec}]"] + new_lines)
+    for index, new_lines in sorted(inserts, reverse=True):
+        lines[index:index] = new_lines
+    return "\n".join(lines) + "\n"
+
+
+def save_values(path, updates):
+    """Write {section: {key: value}} into the settings file, keeping comments."""
+    path = Path(path)
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    new_text = update_text(text, updates)
+    from_dict(tomllib.loads(new_text))  # never write a file that would not load
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(new_text, encoding="utf-8")
+    tmp.replace(path)
+
+
+def diff(old, new):
+    """{section: {key: value}} for every setting that differs between two Settings."""
+    out = {}
+    for f in dataclasses.fields(Settings):
+        a, b = getattr(old, f.name), getattr(new, f.name)
+        for g in dataclasses.fields(a):
+            va, vb = getattr(a, g.name), getattr(b, g.name)
+            if va != vb:
+                out.setdefault(f.name, {})[g.name] = vb
+    return out

@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 from headmouse import config
-from headmouse.app import HeadMouse
+from headmouse.engine import HeadMouse
 from headmouse.controller import AxisMotion, MotionController, orient
 from headmouse.curves import DirectionCurve, MonotoneSpline
 from headmouse.keys import key_code
@@ -208,8 +208,10 @@ class ControllerTests(unittest.TestCase):
                          DirectionCurve(config.Settings().up).speed(5.0))
 
     def test_orient_and_offset(self):
-        s = settings(opentrack={"yaw_right_is_positive": False})
+        s = settings(tracking={"source": "opentrack"}, opentrack={"yaw_right_is_positive": False})
         self.assertEqual(orient((5.0, 2.0), s, (1.0, 1.0)), (-6.0, 1.0))
+        s = settings(webcam={"pitch_up_is_positive": False})       # webcam is the default source
+        self.assertEqual(orient((5.0, 2.0), s), (5.0, -2.0))
 
 
 class SafetyTests(unittest.TestCase):
@@ -288,7 +290,7 @@ class AppTests(unittest.TestCase):
         t = self.run_ticks(app, src, 0.0, 0.1, 10.0)
         backend.keys_down.discard(toggle)
         t = self.run_ticks(app, src, t, 0.5, 10.0)
-        self.assertEqual(app.state, "DISABLED")
+        self.assertEqual(app.state, "OFF")
         self.assertEqual(backend.sent, [])
         backend.keys_down.add(s.key("recenter"))                 # 10 deg is now "center"
         t = self.run_ticks(app, src, t, 0.1, 10.0)
@@ -312,7 +314,8 @@ class AppTests(unittest.TestCase):
         self.assertTrue(app.state.startswith("STOPPED"))
 
     def test_window_filter(self):
-        app, src, backend, _ = self.make(general={"only_when_window_title_contains": "Enshrouded"})
+        app, src, backend, _ = self.make(general={"only_move_in_game_window": True,
+                                                  "auto_enable_in_game": False})
         backend.window_title = "Desktop"
         t = self.run_ticks(app, src, 0.0, 0.5, 12.0)
         self.assertEqual(backend.sent, [])

@@ -1,5 +1,5 @@
 @echo off
-rem Normal use: head control of the mouse.
+rem Opens the HeadMouse window (same as the desktop shortcut, but with a console for messages).
 cd /d "%~dp0"
-py run_headmouse.py %*
-pause
+py -3 run_headmouse.py %*
+if errorlevel 1 pause

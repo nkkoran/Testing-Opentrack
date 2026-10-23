@@ -1,11 +1,13 @@
 @echo off
-rem Phase 3: builds dist\HeadMouse.exe (needs internet the first time for PyInstaller).
+rem Builds dist\HeadMouse\HeadMouse.exe (a folder you can copy anywhere) and a desktop shortcut to it.
 cd /d "%~dp0"
-py -m pip install --upgrade pyinstaller || goto :error
-py -m PyInstaller --onefile --console --name HeadMouse run_headmouse.py || goto :error
-copy /Y headmouse_settings.toml dist\ >nul
+py -3 -m pip install --upgrade pyinstaller -r requirements.txt || goto :error
+py -3 tools\get_face_model.py || goto :error
+py -3 -m PyInstaller --noconfirm --onedir --windowed --name HeadMouse --collect-all mediapipe --add-data "face_landmarker.task;." run_headmouse.pyw || goto :error
+if not exist dist\HeadMouse\headmouse_settings.toml copy headmouse_settings.toml dist\HeadMouse\ >nul
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\make_shortcut.ps1 -Exe "%~dp0dist\HeadMouse\HeadMouse.exe"
 echo.
-echo Built dist\HeadMouse.exe - keep headmouse_settings.toml in the same folder.
+echo Built dist\HeadMouse\HeadMouse.exe - the desktop shortcut now points to it.
 pause
 exit /b 0
 :error

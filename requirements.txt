@@ -1,0 +1,2 @@
+# Built-in webcam tracking (also installs OpenCV and NumPy).
+mediapipe>=0.10.14,<2

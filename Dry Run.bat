@@ -1,5 +1,5 @@
 @echo off
-rem Runs everything except moving the mouse. Shows the speeds it would use.
+rem Opens the HeadMouse window without ever moving the mouse.
 cd /d "%~dp0"
-py run_headmouse.py --dry-run
-pause
+py -3 run_headmouse.py --dry-run
+if errorlevel 1 pause
