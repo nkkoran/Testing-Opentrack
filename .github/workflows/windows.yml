@@ -95,6 +95,25 @@ jobs:
           Remove-Item dist/HeadMouse/headmouse_settings.toml
           if ($p.ExitCode -ne 0) { throw "packaged self-check failed" }
 
+      - name: Only one copy can run
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path dist/HeadMouse/HeadMouse.exe).Path
+          Start-Process $exe
+          Start-Sleep -Seconds 10
+          $first = @(Get-Process HeadMouse -ErrorAction SilentlyContinue)
+          Write-Host "After one launch: $($first.Count) HeadMouse process(es)"
+          Start-Process $exe
+          Start-Sleep -Seconds 8
+          $after = @(Get-Process HeadMouse -ErrorAction SilentlyContinue)
+          Write-Host "After a second launch: $($after.Count) HeadMouse process(es)"
+          if (Test-Path dist/HeadMouse/headmouse.log) { Get-Content dist/HeadMouse/headmouse.log }
+          $after | Stop-Process -Force
+          Remove-Item dist/HeadMouse/headmouse.log, dist/HeadMouse/headmouse_settings.toml -ErrorAction SilentlyContinue
+          Remove-Item dist/HeadMouse/backups -Recurse -ErrorAction SilentlyContinue
+          if ($first.Count -ne 1) { throw "expected exactly 1 process after one launch, got $($first.Count)" }
+          if ($after.Count -ne 1) { throw "a second launch must not start another copy (got $($after.Count))" }
+
       - name: Build HeadMouse-Setup.exe
         shell: pwsh
         run: |

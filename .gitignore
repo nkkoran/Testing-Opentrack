@@ -8,3 +8,4 @@ face_landmarker.task
 headmouse_settings.tmp
 headmouse_error.log
 backups/
+headmouse.log*

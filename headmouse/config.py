@@ -102,7 +102,7 @@ class MotionSettings:
 
 @dataclass
 class SafetySettings:
-    no_data_timeout: float = 0.25
+    no_data_timeout: float = 0.5
     frozen_data_timeout: float = 1.0
     max_jump_degrees: float = 25.0
     jump_holdoff_seconds: float = 0.5

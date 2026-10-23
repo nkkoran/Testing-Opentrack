@@ -49,6 +49,21 @@ class Console:
         print(f"[{time.strftime('%H:%M:%S')}] {text}", flush=True)
 
 
+def _start_log():
+    """Write a small diagnostics log (headmouse.log) next to the settings."""
+    import logging
+    from logging.handlers import RotatingFileHandler
+    try:
+        handler = RotatingFileHandler(base_dir() / "headmouse.log", maxBytes=500_000, backupCount=1,
+                                      encoding="utf-8")
+    except OSError:
+        return
+    handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+    logger = logging.getLogger("headmouse")
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+
+
 def _load_or_exit(path, console):
     try:
         settings, warnings = config.load(path)
@@ -208,6 +223,12 @@ def main(argv=None):
         return run_monitor(args.settings)
     if args.curves:
         return print_curves(args.settings)
+    _start_log()
+    from . import single_instance
+    if not single_instance.acquire():
+        # Already running: show that window instead of fighting it over the webcam and keys.
+        single_instance.show_existing_window()
+        return 0
     if args.calibrate:
         return run_calibrate(args.settings)
     if args.console:

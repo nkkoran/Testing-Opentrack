@@ -8,6 +8,7 @@ threads are queued and executed on the engine thread.
 
 import collections
 import dataclasses
+import logging
 import queue
 import sys
 import threading
@@ -23,6 +24,9 @@ from .tracking import OpenTrackUDPSource
 from .winput import KeyReader, NullInput, WindowsInput, high_resolution_timer
 
 KEY_NAMES = ("pause_hold", "enable_toggle", "recenter", "precision_hold", "calibrate_turn")
+FOCUS_STABLE_SECONDS = 0.4   # the game window must stay (in)active this long before auto on/off
+LOST_BEEP_SECONDS = 1.0      # only beep "tracking lost" when it lasts this long
+log = logging.getLogger("headmouse")
 
 
 @dataclass
@@ -66,6 +70,8 @@ class HeadMouse:
         self.raw_angles = None       # oriented angles before offset and smoothing
         self.eye_pitch = None        # webcam eye direction score (+ up), None without eye data
         self.in_game = False
+        self._focus_candidate = None
+        self._focus_since = 0.0
         self.paused = False
         self.settings = None
         self._events = []
@@ -115,9 +121,16 @@ class HeadMouse:
             self.set_enabled(not self.enabled)
 
         focused = self._game_focused()
-        if focused is not None and g.auto_enable_in_game and focused != self.in_game:
-            self.set_enabled(focused)
-        self.in_game = bool(focused)
+        if focused is None:
+            self.in_game = False
+        else:
+            # Ignore quick focus flickers (overlays, pop-ups): act once it has settled.
+            if focused != self._focus_candidate:
+                self._focus_candidate, self._focus_since = focused, now
+            if focused != self.in_game and now - self._focus_since >= FOCUS_STABLE_SECONDS:
+                self.in_game = focused
+                if g.auto_enable_in_game:
+                    self.set_enabled(focused)
         window_ok = not (g.only_move_in_game_window and focused is False)
 
         paused = self.keys.held(self.vk["pause_hold"])
@@ -242,6 +255,7 @@ class Snapshot:
     glancing: bool = False
     gaze: float = None
     eye_pitch: float = None
+    rate: float = 0.0
     dry_run: bool = False
     settings: object = None
 
@@ -275,6 +289,12 @@ class Engine:
         self._turn_remaining = 0.0
         self._turn_rate = 0.0
         self._turn_acc = 0.0
+        self._lost_since = None
+        self._lost_beeped = False
+        self._rate_at = None
+        self._rate_packets = 0
+        self._next_rate_log = 0.0
+        self.rate = 0.0
         self.calibration_mode = False
         self.settings = None
         self.source = None
@@ -299,6 +319,8 @@ class Engine:
         self.app = HeadMouse(settings, self.source, self._backend,
                              send=not self.dry_run and windows)
         self._maybe_launch_opentrack(settings)
+        from . import __version__
+        log.info("HeadMouse %s started (tracker %s, settings %s)", __version__, settings.tracking.source, self.path)
         self._update_snapshot()
         self._running = True
         self._thread = threading.Thread(target=self._loop, name="headmouse-engine", daemon=True)
@@ -368,6 +390,7 @@ class Engine:
     def _message(self, kind, text):
         if text:
             self._messages.append((kind, text))
+            log.info("%s: %s", kind, text)
 
     def _read_mtime(self):
         try:
@@ -464,8 +487,14 @@ class Engine:
         self._message(event.kind, event.text)
         if event.kind in ("enabled", "disabled", "pause"):
             self._sounds.play(event.kind)
-        elif event.kind in ("tracking_lost", "tracking_ok") and self.app.enabled:
-            self._sounds.play(event.kind)
+        elif event.kind == "tracking_lost":
+            # Movement stops at once, but only beep if it lasts (games can briefly starve the camera).
+            self._lost_since = self._clock()
+        elif event.kind == "tracking_ok":
+            if self._lost_beeped and self.app.enabled:
+                self._sounds.play("tracking_ok")
+            self._lost_since = None
+            self._lost_beeped = False
         elif event.kind == "recentered" and self.settings.tracking.source == "webcam":
             new = dataclasses.replace(self.settings, webcam=dataclasses.replace(
                 self.settings.webcam, neutral_yaw=round(event.data[0], 2),
@@ -486,10 +515,25 @@ class Engine:
             source_error=error, face_visible=getattr(src, "face_visible", None),
             packets=getattr(src, "packets", 0), in_game=app.in_game,
             test_turn_active=self._turn_remaining > 0, dry_run=self.dry_run,
-            glancing=r.glancing, gaze=r.gaze, eye_pitch=app.eye_pitch,
+            glancing=r.glancing, gaze=r.gaze, eye_pitch=app.eye_pitch, rate=self.rate,
             settings=self.settings)
         with self._lock:
             self._snapshot = snap
+
+    def _beep_if_still_lost(self, now):
+        if (self._lost_since is not None and not self._lost_beeped and self.app.enabled
+                and now - self._lost_since >= LOST_BEEP_SECONDS):
+            self._sounds.play("tracking_lost")
+            self._lost_beeped = True
+
+    def _measure_rate(self, now):
+        packets = getattr(self.source, "packets", 0)
+        if self._rate_at is not None:
+            self.rate = (packets - self._rate_packets) / max(1e-6, now - self._rate_at)
+        self._rate_at, self._rate_packets = now, packets
+        if now >= self._next_rate_log:
+            self._next_rate_log = now + 60
+            log.info("tracking rate %.0f/s, state %s", self.rate, self.app.state)
 
     def _loop(self):
         next_check = 0.0
@@ -508,6 +552,8 @@ class Engine:
                 if now >= next_check:
                     next_check = now + 1.0
                     self._check_file()
+                    self._measure_rate(now)
+                self._beep_if_still_lost(now)
                 for event in self.app.tick(now):
                     self._handle(event)
                 if self.calibration_mode and self.app.keys.pressed(self.app.vk["calibrate_turn"]):

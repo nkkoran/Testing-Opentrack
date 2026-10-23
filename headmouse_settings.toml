@@ -171,7 +171,7 @@ precision_speed_factor = 0.2
 # -----------------------------------------------------------------------------
 [safety]
 # Stop if the tracker sends nothing for this many seconds (e.g. face not seen).
-no_data_timeout = 0.25
+no_data_timeout = 0.5
 # Stop if the tracker keeps sending exactly the same numbers for this many
 # seconds (what OpenTrack usually does when it loses your face). 0 = off.
 # If movement stops while you hold your head perfectly still, raise this.

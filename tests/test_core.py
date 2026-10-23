@@ -224,7 +224,8 @@ class SafetyTests(unittest.TestCase):
     def test_no_data(self):
         self.assertEqual(self.mon.check(None, 0)[0], TrackingStatus.NO_DATA)
         self.assertEqual(self.mon.check(self.sample(1, 0.0, 1), 0.0)[0], TrackingStatus.OK)
-        self.assertEqual(self.mon.check(self.sample(1, 0.0, 1), 0.3)[0], TrackingStatus.NO_DATA)
+        self.assertEqual(self.mon.check(self.sample(1, 0.0, 1), 0.3)[0], TrackingStatus.OK)   # brief gap
+        self.assertEqual(self.mon.check(self.sample(1, 0.0, 1), 0.6)[0], TrackingStatus.NO_DATA)
 
     def test_frozen_values(self):
         same = (0, 0, 0, 12.0, 0, 0)
@@ -309,7 +310,7 @@ class AppTests(unittest.TestCase):
         for _ in range(100):                                     # no new packets
             app.tick(t)
             t += DT
-        moved_after_timeout = backend.sent[round(0.3 / DT):]
+        moved_after_timeout = backend.sent[round(0.55 / DT):]   # no_data_timeout is 0.5 s
         self.assertEqual(moved_after_timeout, [])
         self.assertTrue(app.state.startswith("STOPPED"))
 

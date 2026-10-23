@@ -437,7 +437,8 @@ class MainWindow:
             self.switch.select() if snap.enabled else self.switch.deselect()
         ok = snap.tracking == TrackingStatus.OK and not snap.source_error
         source = "Webcam" if snap.source_kind == "webcam" else "OpenTrack"
-        self.chip.configure(text=f"  ●  {source}  ", text_color=STATE_COLORS["ACTIVE"] if ok else DANGER)
+        rate = f" · {snap.rate:.0f}/s" if ok and snap.rate else ""
+        self.chip.configure(text=f"  ●  {source}{rate}  ", text_color=STATE_COLORS["ACTIVE"] if ok else DANGER)
         self.head.draw(snap)
         if snap.yaw_speed or snap.pitch_speed:
             parts = []

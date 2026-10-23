@@ -163,12 +163,32 @@ class AutoEnableTests(unittest.TestCase):
         for title, expected in [("Desktop", False), ("Enshrouded", True), ("Discord", False)]:
             backend.window_title = title
             events = []
-            for _ in range(10):
+            for _ in range(70):                     # focus must settle for 0.4 s first
                 events += app.tick(t)
                 t += DT
             self.assertEqual(app.enabled, expected, title)
         kinds = [e.kind for e in events]
         self.assertIn("disabled", kinds)
+
+
+class FocusFlickerTests(unittest.TestCase):
+    def test_brief_focus_changes_do_not_toggle(self):
+        s = config.Settings()
+        backend = NullInput()
+        app = HeadMouse(s, LiveSource(10.0), backend)
+        t = 0.0
+        backend.window_title = "Enshrouded"
+        for _ in range(70):
+            app.tick(t)
+            t += DT
+        self.assertTrue(app.enabled)
+        events = []
+        for i in range(300):                        # an overlay flickers in front every 0.16 s
+            backend.window_title = "Steam overlay" if (i // 20) % 2 else "Enshrouded"
+            events += app.tick(t)
+            t += DT
+        self.assertTrue(app.enabled)
+        self.assertNotIn("disabled", [e.kind for e in events])
 
 
 class EngineTests(unittest.TestCase):
@@ -262,6 +282,23 @@ class EngineTests(unittest.TestCase):
         config.save_values(self.path, {"left": {"deadzone": 5.0}})
         os.utime(self.path, (time.time() + 5, time.time() + 5))
         self.assertTrue(wait_for(lambda: e.snapshot().settings.left.deadzone == 5.0, timeout=3))
+
+    def test_lost_beep_only_when_loss_lasts(self):
+        e = self.start()
+        self.assertTrue(wait_for(lambda: e.snapshot().state == "ACTIVE"))
+        src = self.sources[0]
+        real = src.latest
+        src.latest = lambda: None                      # short gap (0.7 s): stops, but no beep
+        self.assertTrue(wait_for(lambda: e.snapshot().state.startswith("STOPPED")))
+        time.sleep(0.2)
+        src.latest = real
+        self.assertTrue(wait_for(lambda: e.snapshot().state == "ACTIVE"))
+        self.assertNotIn("tracking_lost", self.sounds.played)
+        src.latest = lambda: None                      # long loss: beeps once
+        time.sleep(1.8)
+        self.assertEqual(self.sounds.played.count("tracking_lost"), 1)
+        src.latest = real
+        self.assertTrue(wait_for(lambda: "tracking_ok" in self.sounds.played))
 
     def test_wizard_hold_stops_movement(self):
         e = self.start()

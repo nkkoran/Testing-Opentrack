@@ -217,6 +217,8 @@ rested in the dead zone for 0.15 s.
 | "Webcam support could not load" | Setup installs the Microsoft Visual C++ runtime when needed. If permission was refused, run setup again and click Yes, or install it from <https://aka.ms/vs/17/release/vc_redist.x64.exe>. |
 | Speeds feel wrong in game | Redo the calibration in **Settings → Game** after changing the game's mouse sensitivity. |
 | F9/F10 also do something in the game | Pick other keys under **Settings → Keys & sound** (e.g. Pause or Scroll Lock). |
+| Beeps a lot / stutters in game | Make sure only one HeadMouse is open (since 1.1.2 a second launch just brings the first window forward). The chip at the top shows the tracking rate (e.g. "Webcam · 30/s"); if it drops a lot while the game runs, close other programs or lower the game's graphics settings. |
+| Something odd happened | `headmouse.log` in the HeadMouse folder (`%LOCALAPPDATA%\Programs\HeadMouse`) records tracking losses, the tracking rate and on/off changes. |
 | HeadMouse closed with an error | See `headmouse_error.log` in the HeadMouse folder (`%LOCALAPPDATA%\HeadMouse` when installed with the one-liner). |
 | Windows Firewall asks about Python | Only needed for OpenTrack mode (local only). Allowing *Private networks* is enough. |
 
