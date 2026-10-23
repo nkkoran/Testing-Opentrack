@@ -6,6 +6,7 @@ Run with no options to open the HeadMouse window. Other modes:
   --dry-run    run everything but never move the mouse (with the window or --console)
   --curves     print the speed tables for the four directions and exit
   --calibrate  console calibration: F6 sends one exact 360-degree turn
+  --selfcheck  check the installation works (optionally write a report file)
 """
 
 import argparse
@@ -196,8 +197,13 @@ def main(argv=None):
     mode.add_argument("--monitor", action="store_true", help="show incoming tracking data only")
     mode.add_argument("--curves", action="store_true", help="print the speed tables and exit")
     mode.add_argument("--calibrate", action="store_true", help="console calibration of counts_per_360")
+    mode.add_argument("--selfcheck", nargs="?", const="", metavar="REPORT",
+                      help="check the installation works; optionally write the report to a file")
     args = parser.parse_args(argv)
 
+    if args.selfcheck is not None:
+        from .selfcheck import run
+        return run(base_dir(), args.settings, args.selfcheck)
     if args.monitor:
         return run_monitor(args.settings)
     if args.curves:

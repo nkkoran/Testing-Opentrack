@@ -167,6 +167,8 @@ only_move_in_game_window = false
 always_on_top = false
 # Window colours: "system" (follow Windows), "light" or "dark".
 theme = "system"
+# Look for a newer HeadMouse when it starts (installed app only).
+check_for_updates = true
 # Show the live status line (console mode).
 show_status = true
 # Set by the setup wizard. false = the wizard opens when HeadMouse starts.

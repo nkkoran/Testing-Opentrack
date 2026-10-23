@@ -7,6 +7,7 @@ Everything here talks to the Engine, which does the real work on its own thread.
 import base64
 import dataclasses
 import sys
+import threading
 import time
 import tkinter as tk
 from pathlib import Path
@@ -14,7 +15,7 @@ from tkinter import messagebox
 
 import customtkinter as ctk
 
-from . import calibration, config, opentrack_setup
+from . import calibration, config, opentrack_setup, updates
 from .curves import DirectionCurve
 from .engine import Engine
 from .keys import name_from_tk_keysym
@@ -256,6 +257,11 @@ class MainWindow:
         self.chip = ctk.CTkLabel(header, text="", font=font(12, "bold"), corner_radius=12, height=26,
                                  fg_color=SUBTLE, text_color=MUTED)
         self.chip.pack(side="right")
+        self.update_button = ctk.CTkButton(header, text="", command=self._update, height=26, corner_radius=12,
+                                           font=font(12, "bold"), fg_color=ACCENT, hover_color=ACCENT_HOVER)
+        self.update_info = None
+        if getattr(sys, "frozen", False) and s.general.check_for_updates:
+            threading.Thread(target=self._check_update, daemon=True).start()
 
         self.status = ctk.CTkFrame(outer, corner_radius=20, fg_color=STATE_COLORS["OFF"], height=110)
         self.status.pack(fill="x", pady=(12, 10))
@@ -308,6 +314,29 @@ class MainWindow:
             root.after(700, self.open_wizard)
 
     # --- actions ---------------------------------------------------------------
+
+    def _check_update(self):
+        self.update_info = updates.available_update()  # read by refresh() on the Tk thread
+
+    def _update(self):
+        version, url = self.update_info
+        if not messagebox.askyesno("HeadMouse", f"Install HeadMouse {version} now?\n\nHeadMouse will close, "
+                                                "update, and start again. Your settings are kept.",
+                                   parent=self.root):
+            return
+        self.update_button.configure(text="Downloading...", state="disabled")
+
+        def work():
+            try:
+                updates.download_and_install(url)
+            except OSError as e:
+                error = str(e)
+                self.root.after(0, lambda: messagebox.showerror("HeadMouse", f"The update failed: {error}",
+                                                                parent=self.root))
+                self.root.after(0, lambda: self.update_button.configure(text="Update", state="normal"))
+                return
+            self.root.after(0, self.close)
+        threading.Thread(target=work, daemon=True).start()
 
     def _switch_flipped(self):
         self.engine.set_enabled(bool(self.switch.get()))
@@ -392,6 +421,9 @@ class MainWindow:
             self.speed.configure(text="Camera still", text_color=MUTED)
         self.camera_switch.configure(state="normal" if snap.source_kind == "webcam" else "disabled")
         self._show_keys(snap.settings.keys)
+        if self.update_info and not self.update_button.winfo_ismapped():
+            self.update_button.configure(text=f"Update to {self.update_info[0]}")
+            self.update_button.pack(side="right", padx=(0, 8))
         messages = self.engine.drain_messages()
         if messages:
             self.message.configure(text=f"{time.strftime('%H:%M')}   {messages[-1][1]}")
@@ -917,6 +949,14 @@ class SettingsWindow(Child):
         self.theme = segmented(scroll, ["System", "Light", "Dark"], self._theme, width=300)
         self.theme.set(self.work.general.theme.title())
         self.theme.pack(anchor="w", pady=6)
+        self.updates = switch(scroll, "Check for updates when HeadMouse starts", lambda: self._set(
+            "general", check_for_updates=bool(self.updates.get())), font=font(13), text_color=TEXT)
+        if self.work.general.check_for_updates:
+            self.updates.select()
+        self.updates.pack(anchor="w", pady=(10, 0))
+        from . import __version__
+        ctk.CTkLabel(scroll, text=f"HeadMouse {__version__}", font=font(11), text_color=MUTED).pack(
+            anchor="w", pady=(8, 0))
 
     def _theme(self, value):
         ctk.set_appearance_mode(value.lower())

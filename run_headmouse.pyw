@@ -10,7 +10,8 @@ try:
 except SystemExit:
     raise
 except BaseException:
-    log = Path(__file__).resolve().parent / "headmouse_error.log"
+    folder = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
+    log = folder / "headmouse_error.log"
     log.write_text(traceback.format_exc(), encoding="utf-8")
     try:
         from tkinter import messagebox

@@ -2,8 +2,10 @@
 #
 #   powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/nkkoran/Testing-Opentrack/master/install.ps1 | iex"
 #
-# Downloads HeadMouse into %LOCALAPPDATA%\HeadMouse, keeps existing settings when
-# updating, then runs tools\setup.ps1 (Python, parts, face model, icons, start).
+# Normally downloads the latest HeadMouse-Setup.exe from the GitHub Releases page and runs
+# it (no Python needed; keeps settings when updating; starts HeadMouse when done).
+# If no release exists yet, falls back to installing from source into
+# %LOCALAPPDATA%\HeadMouse and running tools\setup.ps1.
 # Works in Windows PowerShell 5.1.
 
 $ErrorActionPreference = "Stop"
@@ -15,8 +17,23 @@ $branch = "master"
 $target = if ($env:HEADMOUSE_TARGET) { $env:HEADMOUSE_TARGET } else { Join-Path $env:LOCALAPPDATA "HeadMouse" }
 $keep = @("headmouse_settings.toml", "face_landmarker.task")
 
+if (-not $env:HEADMOUSE_ZIP) {
+    $installer = Join-Path ([IO.Path]::GetTempPath()) "HeadMouse-Setup.exe"
+    try {
+        Write-Host "Downloading HeadMouse..." -ForegroundColor Cyan
+        Invoke-WebRequest "https://github.com/$repo/releases/latest/download/HeadMouse-Setup.exe" `
+            -OutFile $installer -UseBasicParsing
+        Write-Host "Installing HeadMouse - it starts by itself when done."
+        Start-Process -FilePath $installer -ArgumentList "/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
+        Remove-Item $installer -ErrorAction SilentlyContinue
+        return
+    } catch {
+        Write-Host "No ready-made installer found - installing from source instead."
+    }
+}
+
 try {
-    Write-Host "Downloading HeadMouse..." -ForegroundColor Cyan
+    Write-Host "Downloading HeadMouse source..." -ForegroundColor Cyan
     $tmp = Join-Path ([IO.Path]::GetTempPath()) ("headmouse-" + [guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Path $tmp | Out-Null
     $zip = Join-Path $tmp "headmouse.zip"

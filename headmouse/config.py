@@ -65,6 +65,7 @@ class GeneralSettings:
     only_move_in_game_window: bool = False
     always_on_top: bool = False
     theme: str = "system"
+    check_for_updates: bool = True
     show_status: bool = True
     setup_done: bool = False
 

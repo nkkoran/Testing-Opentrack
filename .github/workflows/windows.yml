@@ -1,0 +1,140 @@
+name: Windows build
+
+# Every push: test on real Windows, build HeadMouse.exe and HeadMouse-Setup.exe, and
+# test-install them. A tag like v1.0.0 also publishes a GitHub Release with the installer.
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install requirements
+        run: python -m pip install -r requirements.txt
+
+      - name: Download test assets
+        shell: pwsh
+        run: |
+          python tools/get_face_model.py
+          New-Item -ItemType Directory -Force assets | Out-Null
+          Copy-Item face_landmarker.task assets/
+          Invoke-WebRequest https://storage.googleapis.com/mediapipe-assets/portrait.jpg -OutFile assets/portrait.jpg
+
+      - name: Unit tests (real Windows calls and real MediaPipe)
+        env:
+          HEADMOUSE_TEST_ASSETS: ${{ github.workspace }}\assets
+        run: python -m unittest -v
+
+      - name: Self-check from source
+        run: python run_headmouse.py --selfcheck
+
+      - name: Setup script on Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File tools\setup.ps1 -NoLaunch
+          if ($LASTEXITCODE -ne 0) { throw "setup.ps1 failed with exit code $LASTEXITCODE" }
+          $desktop = [Environment]::GetFolderPath("Desktop")
+          if (-not (Test-Path "$desktop\HeadMouse.lnk")) { throw "desktop shortcut was not created" }
+          $link = (New-Object -ComObject WScript.Shell).CreateShortcut("$desktop\HeadMouse.lnk")
+          Write-Host "Shortcut: $($link.TargetPath) $($link.Arguments)"
+          if (-not (Test-Path $link.TargetPath)) { throw "shortcut target does not exist" }
+
+  build:
+    needs: test
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Check the tag matches the version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $version = python -c "import headmouse; print(headmouse.__version__)"
+          if ("v$version" -ne "${{ github.ref_name }}") { throw "Tag ${{ github.ref_name }} does not match version $version" }
+
+      - name: Install requirements
+        run: python -m pip install -r requirements.txt pyinstaller
+
+      - name: Build HeadMouse.exe
+        shell: pwsh
+        run: |
+          python tools/get_face_model.py
+          python -m PyInstaller --noconfirm --onedir --windowed --name HeadMouse --icon headmouse.ico `
+            --collect-all mediapipe --collect-data customtkinter `
+            --add-data "headmouse.ico;." --add-data "face_landmarker.task;." run_headmouse.pyw
+          $size = (Get-ChildItem dist/HeadMouse -Recurse | Measure-Object Length -Sum).Sum / 1MB
+          Write-Host ("Bundle size: {0:N0} MB" -f $size)
+
+      - name: Self-check the packaged app
+        shell: pwsh
+        run: |
+          Copy-Item headmouse_settings.toml dist/HeadMouse/
+          $p = Start-Process dist/HeadMouse/HeadMouse.exe -ArgumentList "--selfcheck", "$PWD\exe-report.txt" -Wait -PassThru
+          Get-Content exe-report.txt
+          Remove-Item dist/HeadMouse/headmouse_settings.toml
+          if ($p.ExitCode -ne 0) { throw "packaged self-check failed" }
+
+      - name: Build HeadMouse-Setup.exe
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y | Out-Null
+          $version = python -c "import headmouse; print(headmouse.__version__)"
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /Q "/DAppVersion=$version" installer\headmouse.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
+          Write-Host ("Installer size: {0:N0} MB" -f ((Get-Item dist/HeadMouse-Setup.exe).Length / 1MB))
+
+      - name: Test install, self-check, update and uninstall
+        shell: pwsh
+        run: |
+          $dir = "$env:LOCALAPPDATA\Programs\HeadMouse"
+          $setupArgs = "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/NOLAUNCH=1"
+          $code = (Start-Process dist/HeadMouse-Setup.exe -ArgumentList $setupArgs -Wait -PassThru).ExitCode
+          if ($code -ne 0) { throw "installer exited with code $code" }
+          if (-not (Test-Path "$dir\HeadMouse.exe")) { throw "HeadMouse.exe was not installed" }
+          if (-not (Test-Path "$([Environment]::GetFolderPath('Desktop'))\HeadMouse.lnk")) { throw "no desktop icon" }
+          $p = Start-Process "$dir\HeadMouse.exe" -ArgumentList "--selfcheck", "$PWD\installed-report.txt" -Wait -PassThru
+          Get-Content installed-report.txt
+          if ($p.ExitCode -ne 0) { throw "installed self-check failed" }
+          # An update must keep the player's settings.
+          Add-Content "$dir\headmouse_settings.toml" "`n# player edit"
+          Start-Process dist/HeadMouse-Setup.exe -ArgumentList $setupArgs -Wait | Out-Null
+          if (-not (Select-String -Path "$dir\headmouse_settings.toml" -Pattern "player edit" -Quiet)) { throw "update replaced the settings" }
+          Start-Process "$dir\unins000.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES" -Wait | Out-Null
+          Start-Sleep -Seconds 3
+          if (Test-Path "$dir\HeadMouse.exe") { throw "uninstall left HeadMouse.exe behind" }
+          Write-Host "Install, update and uninstall all worked."
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HeadMouse-Setup
+          path: dist/HeadMouse-Setup.exe
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" dist/HeadMouse-Setup.exe `
+            --title "HeadMouse ${{ github.ref_name }}" `
+            --notes "Download **HeadMouse-Setup.exe** below and double-click it. No other downloads needed."
