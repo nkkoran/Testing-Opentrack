@@ -16,34 +16,40 @@ joystick:
 It reads your **webcam directly** (built-in face tracking, no other program needed) or can use
 **OpenTrack** instead. Nothing in the game or in OpenTrack's installation is modified.
 
-> **Status:** everything except the Windows-specific parts was tested here: the motion logic, the
-> setup wizard, the window, and the built-in tracker on a real face image with Google's MediaPipe.
-> Mouse output, key reading and live webcam capture haven't been run on Windows yet. Your first
-> run is the real test (section 3).
+> **Status:** every change is built and tested on Windows by GitHub Actions. That covers the unit
+> tests (including real Windows calls and real MediaPipe face tracking), the packaged app's
+> self-check, and installing, updating and uninstalling. Live webcam use and mouse movement inside
+> Enshrouded can only be tested on the real PC (section 3).
 
 ---
 
-## 1. Install (one step, about 5–10 minutes)
+## 1. Install
 
-Press **Win + R**, paste this line, and press **Enter**:
+**Download and double-click:** get **HeadMouse-Setup.exe** from the
+[latest release](https://github.com/nkkoran/Testing-Opentrack/releases/latest)
+([direct link](https://github.com/nkkoran/Testing-Opentrack/releases/latest/download/HeadMouse-Setup.exe))
+and double-click it.
+
+- Everything is included: no Python and no other downloads. It installs for your user only, so
+  no administrator password is needed.
+- It adds HeadMouse to the Start menu and the desktop, and you can uninstall it from Settings → Apps.
+- HeadMouse starts when the installer finishes.
+- Windows may say *"Windows protected your PC"*, because the app isn't code-signed. Click
+  **More info → Run anyway**.
+
+**Or with one command,** which also skips that Windows warning: press **Win + R**, paste this, and
+press **Enter**:
 
 ```
 powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/nkkoran/Testing-Opentrack/master/install.ps1 | iex"
 ```
 
-A window shows the progress. It:
-- downloads HeadMouse into `%LOCALAPPDATA%\HeadMouse`
-- installs Python 3.13 if it's missing (per-user, no admin needed; via winget, or from python.org)
-- installs the webcam tracking and downloads Google's face model
-- checks that tracking works, installing the Microsoft Visual C++ runtime if it's missing (Windows
-  asks for permission once)
-- puts **HeadMouse** icons on the desktop and in the Start menu
-- starts HeadMouse
+**Updates:** HeadMouse tells you when a new version is out. Press **Update** in the top bar and it
+updates and restarts; your settings are kept. Running the installer or the command again also
+updates.
 
-**To update later,** run the same line again. Your settings are kept.
-
-*Without the one-liner:* download the ZIP (**Code → Download ZIP** on GitHub), extract it, and
-double-click `Setup.bat`. It does the same, minus the download.
+*From source (for the developer):* download the ZIP, extract it, and double-click `Setup.bat`. It
+installs Python if needed, then HeadMouse's parts, and creates the icons.
 
 ## 2. First start: the setup wizard
 
@@ -183,11 +189,15 @@ rested in the dead zone for 0.15 s.
 | HeadMouse closed with an error | See `headmouse_error.log` in the HeadMouse folder (`%LOCALAPPDATA%\HeadMouse` when installed with the one-liner). |
 | Windows Firewall asks about Python | Only needed for OpenTrack mode (local only). Allowing *Private networks* is enough. |
 
-## 10. Optional: a standalone HeadMouse.exe
+## 10. Releasing a new version (developer)
 
-`build_exe.bat` builds `dist\HeadMouse\HeadMouse.exe` with PyInstaller. The folder runs on PCs
-without Python, and the desktop shortcut is pointed at it. It hasn't been tried yet; if it fails,
-keep using the normal shortcut.
+1. Change `__version__` in `headmouse/__init__.py` (e.g. `1.0.1`) and push.
+2. Tag the commit and push the tag: `git tag v1.0.1 && git push origin v1.0.1`.
+3. GitHub Actions tests everything on Windows, builds `HeadMouse-Setup.exe` and publishes it as a
+   release. Installed copies of HeadMouse then offer the update.
+
+Every push also produces the installer as a downloadable artifact on the Actions page.
+`build_exe.bat` builds the app locally; `installer/headmouse.iss` is the Inno Setup script.
 
 ## 11. For the developer
 
@@ -204,6 +214,10 @@ headmouse/opentrack_setup.py  OpenTrack profile copy/patch and launching
 headmouse/winput.py           Windows SendInput / GetAsyncKeyState
 headmouse/sounds.py           generated tone cues (winsound)
 headmouse/config.py           settings loading, validation and comment-preserving saving
+headmouse/updates.py          checks GitHub Releases for a newer version and installs it
+headmouse/selfcheck.py        --selfcheck: verifies an installation (used by the build pipeline)
+installer/headmouse.iss       Windows installer (Inno Setup)
+.github/workflows/windows.yml test, build and release on Windows
 tools/fake_opentrack.py       simulated OpenTrack sender for testing
 tests/                        py -m unittest -v
 ```
