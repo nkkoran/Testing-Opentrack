@@ -1,7 +1,8 @@
 name: Windows build
 
 # Every push: test on real Windows, build HeadMouse.exe and HeadMouse-Setup.exe, and
-# test-install them. A tag like v1.0.0 also publishes a GitHub Release with the installer.
+# test-install them. When master has a version (headmouse/__init__.py) that has no
+# release yet, a GitHub Release with the installer is published automatically.
 
 on:
   push:
@@ -129,12 +130,17 @@ jobs:
           name: HeadMouse-Setup
           path: dist/HeadMouse-Setup.exe
 
-      - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Publish release (when this version has not been released yet)
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v'))
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" dist/HeadMouse-Setup.exe `
-            --title "HeadMouse ${{ github.ref_name }}" `
-            --notes "Download **HeadMouse-Setup.exe** below and double-click it. No other downloads needed."
+          $version = python -c "import headmouse; print(headmouse.__version__)"
+          $tag = "v$version"
+          gh release view $tag --repo "${{ github.repository }}" *> $null
+          if ($LASTEXITCODE -eq 0) { Write-Host "Release $tag already exists - nothing to publish."; exit 0 }
+          gh release create $tag dist/HeadMouse-Setup.exe --repo "${{ github.repository }}" --target "$env:GITHUB_SHA" `
+            --title "HeadMouse $tag" `
+            --notes "Download **HeadMouse-Setup.exe** below and double-click it. Everything is included - no other downloads needed."
+          if ($LASTEXITCODE -ne 0) { throw "creating the release failed" }

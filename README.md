@@ -191,10 +191,10 @@ rested in the dead zone for 0.15 s.
 
 ## 10. Releasing a new version (developer)
 
-1. Change `__version__` in `headmouse/__init__.py` (e.g. `1.0.1`) and push.
-2. Tag the commit and push the tag: `git tag v1.0.1 && git push origin v1.0.1`.
-3. GitHub Actions tests everything on Windows, builds `HeadMouse-Setup.exe` and publishes it as a
-   release. Installed copies of HeadMouse then offer the update.
+1. Change `__version__` in `headmouse/__init__.py` (e.g. `1.0.1`) and push to `master`.
+2. GitHub Actions tests everything on Windows, builds `HeadMouse-Setup.exe`, and, because there's
+   no release for that version yet, publishes release `v1.0.1` with the installer attached.
+   Installed copies of HeadMouse then offer the update.
 
 Every push also produces the installer as a downloadable artifact on the Actions page.
 `build_exe.bat` builds the app locally; `installer/headmouse.iss` is the Inno Setup script.
