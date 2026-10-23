@@ -137,6 +137,7 @@ with a red dot where your head is right now.
 | Head turn for full speed | Smaller = less head movement needed |
 | Top speed | Fastest turning |
 | Dead zone | How far you can move before the camera starts turning |
+| Start delay | Wait this long before turning (down: 0.2 s, so a quick glance doesn't move the camera) |
 | Slowest speed *(advanced)* | Speed just outside the dead zone |
 | Curve *(advanced)* | 1 = even; higher = finer control near center, faster further out |
 
@@ -145,6 +146,25 @@ precision mode is.
 
 Everything is stored in `headmouse_settings.toml` (with explanations). It can also be edited in
 Notepad, and changes apply within a second.
+
+### Glancing away (e.g. at the keyboard)
+
+HeadMouse keeps the camera still when you look away from the screen:
+- **Eyes (built-in webcam):** it combines head tilt with eye direction to work out where you're
+  looking. Steering while watching the screen keeps your gaze on the screen, because your eyes
+  roll the other way. Looking down at the keyboard sends your gaze below it, and the camera
+  pauses. The eyes move first, so it usually pauses before the head has moved at all. Blinks
+  are ignored.
+- **Far away:** a head turn well beyond your normal steering range (1.5× the full-speed angle),
+  or a very fast turn past full speed, counts as looking away. This works with OpenTrack too.
+- **Start delay:** looking down only starts turning the camera after 0.2 s.
+
+The status card shows **Looking away** meanwhile. Movement resumes once you're looking at the
+screen again and your head has settled, so coming back up doesn't move the camera either.
+
+The setup wizard's **Glance at your keyboard** step learns your own eye movement. If you set up
+HeadMouse before this feature existed, run the wizard once more (Settings → Tracking). Adjust or
+switch it off under **Settings → Feel → Glancing away**.
 
 ## 7. Using OpenTrack instead of the webcam tracker
 
@@ -180,6 +200,8 @@ rested in the dead zone for 0.15 s.
 | Movement is jittery | **Settings → Tracking → Steadiness**: move it left. Or raise the dead zone. |
 | Movement feels laggy | Move Steadiness a little to the right. |
 | Turns the wrong way | Run the **Setup wizard**; it fixes directions automatically. |
+| Camera moves when glancing at the keyboard | Run the setup wizard again (it learns your glances), or under **Settings → Feel → Glancing away** lower "How far below the screen". With OpenTrack, raise the down **Start delay**. |
+| Camera pauses while steering normally ("Looking away") | Under **Settings → Feel → Glancing away**, raise "How far below the screen" or "Far away means", or switch the eye check off. |
 | Drifts with head centered | Press **Re-center** (F8) while looking straight at the screen. |
 | Doesn't turn on in the game | The game's window title must contain "Enshrouded" (`game_window_title` in the settings file). Or just press F10. |
 | Shows ACTIVE but the game camera doesn't move | If Enshrouded runs as administrator, Windows silently blocks input from normal programs. Run HeadMouse as administrator too (right-click → Run as administrator). |
@@ -206,7 +228,8 @@ headmouse/tracking.py         OpenTrack UDP input (6 little-endian doubles: X,Y,
 headmouse/webcam.py           built-in tracking: OpenCV + MediaPipe Face Landmarker, One Euro filter
 headmouse/safety.py           decides whether tracking data can be trusted
 headmouse/curves.py           head angle -> camera speed for one direction
-headmouse/controller.py       joystick logic: dead zones, no-reverse rule, pause, fractions -> counts
+headmouse/controller.py       joystick logic: dead zones, start delay, no-reverse rule, pause, fractions -> counts
+headmouse/glance.py           glance guard: pauses while looking away (gaze from head + eyes, look-away range)
 headmouse/engine.py           the loop on a background thread; keys, sounds, auto-on, test turn
 headmouse/calibration.py      setup-wizard maths
 headmouse/gui.py              the window (CustomTkinter): main screen, Settings, setup wizard

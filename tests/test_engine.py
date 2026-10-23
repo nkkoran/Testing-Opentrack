@@ -309,6 +309,7 @@ class WebcamIntegrationTest(unittest.TestCase):
         self.assertLess(first * second, 0)          # mirroring flips the yaw sign
         self.assertIsNotNone(src.preview_png())
         self.assertGreater(src.packets, 60)
+        self.assertIsNotNone(src.latest().eye_pitch)       # eye data for the glance guard
 
 
 if __name__ == "__main__":

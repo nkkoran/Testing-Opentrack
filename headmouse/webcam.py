@@ -40,6 +40,19 @@ def matrix_to_angles(m):
     return -yaw, -pitch, roll
 
 
+def eye_signals(blendshapes):
+    """(eye_pitch, blink) from MediaPipe face blendshapes.
+
+    eye_pitch is look-up minus look-down, averaged over both eyes (about -1..1,
+    + up). blink is how closed the eyes are (0 open .. 1 closed).
+    """
+    score = {c.category_name: c.score for c in blendshapes}
+    up = (score.get("eyeLookUpLeft", 0.0) + score.get("eyeLookUpRight", 0.0)) / 2
+    down = (score.get("eyeLookDownLeft", 0.0) + score.get("eyeLookDownRight", 0.0)) / 2
+    blink = (score.get("eyeBlinkLeft", 0.0) + score.get("eyeBlinkRight", 0.0)) / 2
+    return up - down, blink
+
+
 def find_model(base_dir, configured=""):
     """Locate the face model: configured path, next to the program, or inside the .exe."""
     candidates = []
@@ -157,6 +170,7 @@ class WebcamSource:
                 base_options=BaseOptions(model_asset_buffer=Path(model).read_bytes()),
                 running_mode=vision.RunningMode.VIDEO,
                 num_faces=1,
+                output_face_blendshapes=True,
                 output_facial_transformation_matrixes=True)
             landmarker = vision.FaceLandmarker.create_from_options(options)
         except Exception as e:  # MediaPipe raises several exception types
@@ -223,10 +237,11 @@ class WebcamSource:
         yaw = self._yaw_filter(yaw, now)
         pitch = self._pitch_filter(pitch, now)
         values = (float(m[0][3]), float(m[1][3]), float(m[2][3]), yaw, pitch, roll)
+        eye_pitch, blink = eye_signals(result.face_blendshapes[0]) if result.face_blendshapes else (None, 0.0)
         with self._lock:
             self._sequence += 1
-            self._latest = HeadSample(yaw=yaw, pitch=pitch, values=values,
-                                      received_at=now, sequence=self._sequence)
+            self._latest = HeadSample(yaw=yaw, pitch=pitch, values=values, received_at=now,
+                                      sequence=self._sequence, eye_pitch=eye_pitch, blink=blink)
         self.packets += 1
 
     def _make_preview(self, cv2, frame, result):

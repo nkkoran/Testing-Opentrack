@@ -60,6 +60,7 @@ class DirectionCurve:
 
     def __init__(self, settings):
         self.deadzone = settings.deadzone
+        self.start_delay = settings.start_delay
         self._settings = settings
         self._spline = MonotoneSpline(settings.points) if settings.points else None
 

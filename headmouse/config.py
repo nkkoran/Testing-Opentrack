@@ -114,6 +114,7 @@ class DirectionSettings:
     max_speed: float = 180.0
     full_speed_angle: float = 15.0
     curve: float = 2.45
+    start_delay: float = 0.0
     points: list = field(default_factory=list)
 
 
@@ -122,9 +123,24 @@ def _horizontal():
                              full_speed_angle=15.0, curve=2.45)
 
 
-def _vertical():
+def _vertical(start_delay=0.0):
     return DirectionSettings(deadzone=2.0, min_speed=4.0, max_speed=60.0,
-                             full_speed_angle=10.0, curve=1.95)
+                             full_speed_angle=10.0, curve=1.95, start_delay=start_delay)
+
+
+@dataclass
+class GlanceSettings:
+    enabled: bool = True
+    eye_check: bool = True
+    eye_threshold: float = 15.0
+    eye_scale: float = 30.0
+    eye_neutral: float = 0.0
+    blink_limit: float = 0.5
+    look_away: bool = True
+    look_away_factor: float = 1.5
+    look_away_speed: float = 150.0
+    settle_time: float = 0.3
+    settle_speed: float = 20.0
 
 
 @dataclass
@@ -141,7 +157,8 @@ class Settings:
     right: DirectionSettings = field(default_factory=_horizontal)
     left: DirectionSettings = field(default_factory=_horizontal)
     up: DirectionSettings = field(default_factory=_vertical)
-    down: DirectionSettings = field(default_factory=_vertical)
+    down: DirectionSettings = field(default_factory=lambda: _vertical(start_delay=0.2))
+    glance: GlanceSettings = field(default_factory=GlanceSettings)
 
     def source_settings(self):
         """The [webcam] or [opentrack] section for the tracker in use."""
@@ -212,6 +229,7 @@ def _check(condition, message):
 
 def _validate_direction(name, d):
     _check(d.deadzone >= 0, f"[{name}] deadzone must be 0 or more")
+    _check(0 <= d.start_delay <= 2, f"[{name}] start_delay must be between 0 and 2 seconds")
     if d.points:
         pts = d.points
         _check(len(pts) >= 2, f"[{name}] points needs at least two [angle, speed] pairs")
@@ -268,6 +286,13 @@ def validate(s):
     _check(s.safety.jump_holdoff_seconds >= 0, "[safety] jump_holdoff_seconds must be 0 or more")
     for name in ("right", "left", "up", "down"):
         _validate_direction(name, getattr(s, name))
+    g = s.glance
+    _check(g.eye_threshold > 0, "[glance] eye_threshold must be more than 0")
+    _check(g.eye_scale > 0, "[glance] eye_scale must be more than 0")
+    _check(0 < g.blink_limit <= 1, "[glance] blink_limit must be more than 0 and at most 1")
+    _check(g.look_away_factor > 1, "[glance] look_away_factor must be more than 1")
+    _check(g.look_away_speed >= 0, "[glance] look_away_speed must be 0 or more")
+    _check(g.settle_time >= 0 and g.settle_speed > 0, "[glance] settle_time >= 0 and settle_speed > 0")
 
 
 def load(path):

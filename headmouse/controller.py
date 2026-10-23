@@ -8,6 +8,7 @@ import math
 from dataclasses import dataclass
 
 from .curves import DirectionCurve
+from .glance import GlanceGuard
 
 
 def orient(raw, settings, offset=(0.0, 0.0)):
@@ -26,7 +27,9 @@ class AxisMotion:
 
     Direction only reverses after the head has been back inside the dead zone
     (stopped) for at least `reverse_delay` seconds, so returning toward center can
-    slow the camera but never turn it the other way.
+    slow the camera but never turn it the other way. Movement in a direction only
+    starts once the head has stayed past its dead zone for that direction's
+    `start_delay` (so a quick glance doesn't move the camera).
     """
 
     def __init__(self, positive, negative, hysteresis, reverse_delay):
@@ -40,6 +43,7 @@ class AxisMotion:
         self.direction = 0        # -1, 0 or +1: what the axis is doing right now
         self.last_direction = 0   # last non-zero direction, for the reversal guard
         self.stopped_time = math.inf
+        self.pending = 0.0        # time spent waiting out the start delay
 
     def in_deadzone(self, angle):
         curve = self.positive if angle >= 0 else self.negative
@@ -63,6 +67,15 @@ class AxisMotion:
                 and self.stopped_time < self.reverse_delay:
             wanted = 0  # crossed center too quickly to count as a deliberate reversal
 
+        if wanted != 0 and wanted != self.direction:
+            self.pending += dt
+            if self.pending < curve.start_delay:
+                self.direction = 0
+                self.stopped_time += dt
+                return 0.0
+        elif wanted == 0:
+            self.pending = 0.0
+
         if wanted == 0:
             self.direction = 0
             self.stopped_time += dt
@@ -70,6 +83,7 @@ class AxisMotion:
                 self.last_direction = 0
             return 0.0
 
+        self.pending = 0.0
         self.direction = self.last_direction = wanted
         self.stopped_time = 0.0
         return wanted * curve.speed_beyond_deadzone(magnitude)
@@ -84,6 +98,8 @@ class StepResult:
     yaw_speed: float = 0.0       # camera degrees/second, + is right
     pitch_speed: float = 0.0     # camera degrees/second, + is up
     waiting_for_center: bool = False
+    glancing: bool = False       # paused because the player is looking away
+    gaze: float = None           # vertical gaze in degrees (+ up), when eye data is available
 
 
 class MotionController:
@@ -96,6 +112,7 @@ class MotionController:
                                      m.deadzone_hysteresis, m.reverse_delay_seconds)
         self.counts_per_degree_x = settings.mouse.counts_per_360 / 360.0
         self.counts_per_degree_y = self.counts_per_degree_x * settings.mouse.vertical_scale
+        self.glance = GlanceGuard(settings)
         self._smoothed = None
         self._acc_x = 0.0
         self._acc_y = 0.0
@@ -111,16 +128,19 @@ class MotionController:
         result.waiting_for_center = self._need_center
         return result
 
-    def step(self, angles, dt, hold=False, precision=False):
+    def step(self, angles, dt, hold=False, precision=False, eye_pitch=None, blink=0.0):
         """Advance one tick.
 
         angles    -- (yaw, pitch) from orient(), or None when tracking is not usable
         dt        -- seconds since the previous tick
         hold      -- True while paused, disabled or otherwise not allowed to move
         precision -- True while precision (slow) mode is held
+        eye_pitch -- eye direction score from the webcam (+ up), None if unknown
+        blink     -- how closed the eyes are (0-1)
         """
         if angles is None:
             self._smoothed = None
+            self.glance.update(None, dt)
             return self._stop(StepResult())
 
         tau = self.s.motion.smoothing_seconds
@@ -131,8 +151,10 @@ class MotionController:
             self._smoothed = tuple(p + a * (n - p) for p, n in zip(self._smoothed, angles))
         yaw, pitch = self._smoothed
         result = StepResult(yaw=yaw, pitch=pitch)
+        result.glancing = self.glance.update((yaw, pitch), dt, eye_pitch, blink)
+        result.gaze = self.glance.gaze
 
-        if hold:
+        if hold or result.glancing:
             return self._stop(result)
 
         if self._need_center:

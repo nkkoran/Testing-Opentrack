@@ -19,6 +19,8 @@ class HeadSample:
     values: tuple       # every number the tracker sent, used to spot frozen data
     received_at: float  # time.perf_counter() when it arrived
     sequence: int       # increases by one for each sample received
+    eye_pitch: float = None  # webcam only: eye direction score, + up (MediaPipe blendshapes)
+    blink: float = 0.0       # webcam only: how closed the eyes are, 0-1
 
 
 # OpenTrack's "UDP over network" output sends six little-endian doubles per packet,

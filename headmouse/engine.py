@@ -64,6 +64,7 @@ class HeadMouse:
         self.result = StepResult()
         self.tracking = TrackingStatus.NO_DATA
         self.raw_angles = None       # oriented angles before offset and smoothing
+        self.eye_pitch = None        # webcam eye direction score (+ up), None without eye data
         self.in_game = False
         self.paused = False
         self.settings = None
@@ -125,8 +126,11 @@ class HeadMouse:
         self.paused = paused
         precision = self.keys.held(self.vk["precision_hold"])
 
-        self.tracking, raw = self.monitor.check(self.source.latest(), now)
+        sample = self.source.latest()
+        self.tracking, raw = self.monitor.check(sample, now)
         self.raw_angles = orient(raw, self.settings) if raw is not None else None
+        self.eye_pitch = sample.eye_pitch if raw is not None else None
+        blink = sample.blink if raw is not None else 0.0
         if self.tracking != self._reported_tracking:
             if self.tracking == TrackingStatus.OK:
                 self._events.append(Event("tracking_ok", "Tracking OK"))
@@ -143,7 +147,8 @@ class HeadMouse:
         if self.raw_angles is not None:
             angles = (self.raw_angles[0] - self.offset[0], self.raw_angles[1] - self.offset[1])
         hold = paused or not self.enabled or not window_ok or bool(self.holds)
-        self.result = self.controller.step(angles, dt, hold=hold, precision=precision)
+        self.result = self.controller.step(angles, dt, hold=hold, precision=precision,
+                                           eye_pitch=self.eye_pitch, blink=blink)
 
         if self.send and (self.result.dx or self.result.dy):
             self.backend.send_relative(self.result.dx, self.result.dy)
@@ -162,6 +167,8 @@ class HeadMouse:
             self.state = "STOPPED: " + self.tracking.value
         elif paused:
             self.state = "PAUSED"
+        elif self.result.glancing:
+            self.state = "LOOKING AWAY"
         elif self.result.waiting_for_center:
             self.state = "CENTER HEAD TO RESUME"
         else:
@@ -225,6 +232,9 @@ class Snapshot:
     packets: int = 0
     in_game: bool = False
     test_turn_active: bool = False
+    glancing: bool = False
+    gaze: float = None
+    eye_pitch: float = None
     dry_run: bool = False
     settings: object = None
 
@@ -469,6 +479,7 @@ class Engine:
             source_error=error, face_visible=getattr(src, "face_visible", None),
             packets=getattr(src, "packets", 0), in_game=app.in_game,
             test_turn_active=self._turn_remaining > 0, dry_run=self.dry_run,
+            glancing=r.glancing, gaze=r.gaze, eye_pitch=app.eye_pitch,
             settings=self.settings)
         with self._lock:
             self._snapshot = snap

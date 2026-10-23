@@ -180,6 +180,8 @@ def describe(snap):
         return "Waiting for the game", f"Moves the camera only in {s.general.game_window_title}", "WAITING"
     if snap.paused:
         return "Frozen", f"Release {k.pause_hold} to continue", "PAUSED"
+    if snap.glancing:
+        return "Looking away", "The camera waits until you look back at the screen", "CENTER"
     if state.startswith("CENTER"):
         return "Center your head", "Movement resumes once your head is back in the middle", "CENTER"
     if "precision" in state:
@@ -243,6 +245,7 @@ class MainWindow:
         self.children = {}
         self.preview_photo = None
         self._last_title = None
+        self._notice_until = 0.0  # keep a notice in the message line until then
         s = engine.settings
         root.title("HeadMouse" + ("  (test mode - the mouse will not move)" if engine.dry_run else ""))
         root.configure(fg_color=BG)
@@ -312,6 +315,11 @@ class MainWindow:
         self.refresh()
         if not s.general.setup_done:
             root.after(700, self.open_wizard)
+        elif s.tracking.source == "webcam" and s.glance.eye_check and s.glance.eye_neutral == 0.0:
+            # Set up before glance detection existed: suggest teaching it once.
+            self.message.configure(text="New: HeadMouse can ignore glances at the keyboard. "
+                                        "Run the setup wizard once (Settings > Tracking) to teach it.")
+            self._notice_until = time.monotonic() + 20
 
     # --- actions ---------------------------------------------------------------
 
@@ -425,7 +433,7 @@ class MainWindow:
             self.update_button.configure(text=f"Update to {self.update_info[0]}")
             self.update_button.pack(side="right", padx=(0, 8))
         messages = self.engine.drain_messages()
-        if messages:
+        if messages and time.monotonic() >= self._notice_until:
             self.message.configure(text=f"{time.strftime('%H:%M')}   {messages[-1][1]}")
         self.root.after(40, self.refresh)
 
@@ -653,13 +661,16 @@ class SettingsWindow(Child):
             "deadzone": SliderRow(scroll, "Dead zone", 0, 10, 0.1, deg,
                                   lambda v: self._dir_changed("deadzone", v),
                                   "How far you can move before the camera starts turning"),
+            "start_delay": SliderRow(scroll, "Start delay", 0, 0.6, 0.05, lambda v: f"{v:.2f} s",
+                                     lambda v: self._dir_changed("start_delay", v),
+                                     "Wait this long before turning - lets you glance without moving"),
             "min_speed": SliderRow(scroll, "Slowest speed", 0, 60, 0.5, speed,
                                    lambda v: self._dir_changed("min_speed", v), "Speed just outside the dead zone"),
             "curve": SliderRow(scroll, "Curve", 0.5, 4, 0.05, lambda v: f"{v:.2f}",
                                lambda v: self._dir_changed("curve", v),
                                "Higher = finer control near the middle, faster further out"),
         }
-        for name in ("full_speed_angle", "max_speed", "deadzone"):
+        for name in ("full_speed_angle", "max_speed", "deadzone", "start_delay"):
             self.rows[name].frame.pack(fill="x", pady=(12, 0))
         self.advanced = switch(scroll, "Show advanced", self._advanced, font=font(13), text_color=TEXT)
         self.advanced.pack(anchor="w", pady=(14, 0))
@@ -674,6 +685,33 @@ class SettingsWindow(Child):
                                    "Camera speed while the precision key is held")
         self.precision.frame.pack(fill="x")
         self.precision.set(self.work.motion.precision_speed_factor * 100)
+        ctk.CTkFrame(scroll, height=1, fg_color=BORDER).pack(fill="x", pady=16)
+        ctk.CTkLabel(scroll, text="Glancing away", font=font(15, "bold"), text_color=TEXT).pack(anchor="w")
+        ctk.CTkLabel(scroll, text="Keep the camera still when you look away from the screen, e.g. at the keyboard.",
+                     font=font(11), text_color=MUTED, wraplength=470, justify="left").pack(anchor="w")
+        g = self.work.glance
+        self.eye_switch = switch(scroll, "Use my eyes (built-in webcam): pause when I look below the screen",
+                                 lambda: self._set("glance", eye_check=bool(self.eye_switch.get())),
+                                 font=font(13), text_color=TEXT)
+        if g.eye_check:
+            self.eye_switch.select()
+        self.eye_switch.pack(anchor="w", pady=(8, 0))
+        self.eye_row = SliderRow(scroll, "How far below the screen", 5, 40, 1, lambda v: f"{v:.0f}°",
+                                 lambda v: self._set("glance", eye_threshold=round(v, 1)),
+                                 "Smaller = pauses sooner when you look down")
+        self.eye_row.frame.pack(fill="x", pady=(8, 0))
+        self.eye_row.set(g.eye_threshold)
+        self.far_switch = switch(scroll, "Pause when I turn my head far away from the screen",
+                                 lambda: self._set("glance", look_away=bool(self.far_switch.get())),
+                                 font=font(13), text_color=TEXT)
+        if g.look_away:
+            self.far_switch.select()
+        self.far_switch.pack(anchor="w", pady=(12, 0))
+        self.far_row = SliderRow(scroll, "Far away means", 1.2, 3.0, 0.1, lambda v: f"{v:.1f}x",
+                                 lambda v: self._set("glance", look_away_factor=round(v, 2)),
+                                 "Times the head turn for full speed")
+        self.far_row.frame.pack(fill="x", pady=(8, 0))
+        self.far_row.set(g.look_away_factor)
         self._load_direction()
 
     def _advanced(self):
@@ -1014,7 +1052,6 @@ class WizardWindow(Child):
         ("up", 1, "Tilt your head up", (0, -1)),
         ("down", 1, "Tilt your head down", (0, 1)),
     ]
-    TOTAL = 7
 
     def __init__(self, main):
         super().__init__(main, "HeadMouse setup", "640x640")
@@ -1023,7 +1060,9 @@ class WizardWindow(Child):
         self.capturing = None
         self.neutral = None
         self.movements = {}
-        self.step = 0
+        self.recorded = {}
+        self.page = "intro"
+        self.dir_index = 0
         self.photo = None
 
         buttons = ctk.CTkFrame(self.top, fg_color="transparent")
@@ -1069,15 +1108,20 @@ class WizardWindow(Child):
         self.figure = None
         self.meter = None
 
+    def _webcam(self):
+        return self.engine.settings.tracking.source == "webcam"
+
     def _set_step(self, n):
-        self.step = n
-        self.step_label.configure(text=f"STEP {n + 1} OF {self.TOTAL}")
-        self.progress.set((n + 1) / self.TOTAL)
+        total = 8 if self._webcam() else 7  # the glance step needs the webcam's eye data
+        n = min(n, total - 1)
+        self.step_label.configure(text=f"STEP {n + 1} OF {total}")
+        self.progress.set((n + 1) / total)
 
     # pages -------------------------------------------------------------------
 
     def show_intro(self):
         self._clear()
+        self.page = "intro"
         self._set_step(0)
         self.heading.configure(text="Let's set up head control")
         self.text.configure(text="About a minute. HeadMouse measures how far you can comfortably move your head "
@@ -1142,6 +1186,7 @@ class WizardWindow(Child):
 
     def show_neutral(self):
         self._clear()
+        self.page = "neutral"
         self._set_step(1)
         self.heading.configure(text="Look at the middle of the screen")
         self.text.configure(text="Sit the way you normally play and relax. Press Start, then hold still "
@@ -1153,21 +1198,50 @@ class WizardWindow(Child):
 
     def show_direction(self, index):
         self._clear()
+        self.page = "direction"
+        self.dir_index = index
         self._set_step(index + 2)
         name, axis, title, vec = self.STEPS[index]
         self.heading.configure(text=title)
-        self.text.configure(text="As far as is comfortable - no straining. Press Start, turn, and hold "
-                                 "until the beep (4 seconds).")
+        eyes = " Keep your eyes on the screen." if axis == 1 else ""
+        self.text.configure(text="As far as is comfortable - no straining." + eyes + " Press Start, turn, "
+                                 "and hold until the beep (4 seconds).")
         self._figure(vec)
         self._meter()
         self.next_button.configure(text="Start", state="normal")
         self.status.configure(text="")
 
+    def show_glance(self):
+        self._clear()
+        self.page = "glance"
+        self._set_step(6)
+        self.heading.configure(text="Glance at your keyboard")
+        self.text.configure(text="Press Start, then look down at your keyboard as if checking a key, and back "
+                                 "at the screen. Do it twice, until the beep (6 seconds). This teaches "
+                                 "HeadMouse to ignore glances.")
+        self._figure((0, 1))
+        self.next_button.configure(text="Start", state="normal")
+        self.status.configure(text="")
+
+    def _glance_settings(self, old, new, report, problems):
+        """Fit the glance settings from the recorded eye data (webcam only)."""
+        neutral = self.recorded.get("neutral", [])
+        flip = -1.0 if new.webcam.pitch_up_is_positive != old.webcam.pitch_up_is_positive else 1.0
+        rel = lambda rows: [(flip * (r[1] - self.neutral.pitch), r[2]) for r in rows if r[2] is not None]
+        screen = rel(self.recorded.get("up", []) + self.recorded.get("down", []) + neutral)
+        glance = rel(self.recorded.get("glance", []))
+        neutral_eye = [r[2] for r in neutral if r[2] is not None]
+        new, glance_report, glance_problems = calibration.propose_glance(new, neutral_eye, screen, glance)
+        return new, report + glance_report, problems + glance_problems
+
     def show_results(self):
         self._clear()
-        self._set_step(self.TOTAL - 1)
-        new, report, problems, offset = calibration.propose(
-            self.engine.settings, self.engine.settings.tracking.source, self.neutral, self.movements)
+        self.page = "results"
+        self._set_step(99)
+        old = self.engine.settings
+        new, report, problems, offset = calibration.propose(old, old.tracking.source, self.neutral, self.movements)
+        if self._webcam() and "glance" in self.recorded:
+            new, report, problems = self._glance_settings(old, new, report, problems)
         self.result = (new, offset)
         self.heading.configure(text="All set!" if not problems else "Almost there")
         self.text.configure(text="Here's what HeadMouse measured. You can fine-tune it later in Settings.")
@@ -1183,6 +1257,9 @@ class WizardWindow(Child):
                                                                                             pady=(8, 0))
             ctk.CTkLabel(cell, text=f"range {m.extent:.0f}°  ·  full speed at {d.full_speed_angle:g}°",
                          font=font(12), text_color=MUTED).pack(anchor="w", padx=12, pady=(0, 8))
+        for line in [r for r in report if r.startswith("Glances")]:
+            ctk.CTkLabel(self.content, text=line, font=font(12), text_color=TEXT, wraplength=540,
+                         justify="left", anchor="w").pack(fill="x", pady=(6, 0))
         for line in problems + [r for r in report if "reversed" in r]:
             ctk.CTkLabel(self.content, text=line, font=font(12), text_color=pick(STATE_COLORS["PAUSED"]),
                          wraplength=540, justify="left", anchor="w").pack(fill="x", pady=(6, 0))
@@ -1194,13 +1271,15 @@ class WizardWindow(Child):
     def next(self):
         if self.capturing:
             return
-        if self.step == 0:
+        if self.page == "intro":
             self.engine.set_preview(False)
             self.show_neutral()
-        elif self.step == 1:
+        elif self.page == "neutral":
             self._capture(3.0, 0.5, self._neutral_done)
-        elif 2 <= self.step <= 5:
+        elif self.page == "direction":
             self._capture(4.0, 1.5, self._direction_done)
+        elif self.page == "glance":
+            self._capture(6.0, 0.3, self._glance_done)
         else:
             new, offset = self.result
             self.engine.apply_settings(replace(new, "general", setup_done=True))
@@ -1222,22 +1301,30 @@ class WizardWindow(Child):
             self.next_button.configure(state="normal")
             return
         self.neutral = calibration.measure_neutral(self.samples)
+        self.recorded["neutral"] = self.samples
         self.show_direction(0)
 
     def _direction_done(self):
-        name, axis, *_ = self.STEPS[self.step - 2]
+        name, axis, *_ = self.STEPS[self.dir_index]
         self.movements[name] = calibration.measure_movement(self.samples, self.neutral, axis)
-        if self.step - 1 < len(self.STEPS):
-            self.show_direction(self.step - 1)
+        self.recorded[name] = self.samples
+        if self.dir_index + 1 < len(self.STEPS):
+            self.show_direction(self.dir_index + 1)
+        elif self._webcam():
+            self.show_glance()
         else:
             self.show_results()
+
+    def _glance_done(self):
+        self.recorded["glance"] = self.samples
+        self.show_results()
 
     def poll(self):
         if not self.alive():
             return
         snap = self.engine.snapshot()
         ok = snap.tracking == TrackingStatus.OK and not snap.source_error
-        if self.step == 0:
+        if self.page == "intro":
             if snap.source_error:
                 self.status.configure(text=snap.source_error, text_color=DANGER)
             elif ok:
@@ -1253,7 +1340,7 @@ class WizardWindow(Child):
                     self.preview.pack(pady=6)
         self._draw_figure()
         if self.meter is not None and snap.raw_angles is not None and self.neutral is not None:
-            name, axis, *_ = self.STEPS[self.step - 2]
+            name, axis, *_ = self.STEPS[self.dir_index]
             center = self.neutral.yaw if axis == 0 else self.neutral.pitch
             value = abs(snap.raw_angles[axis] - center)
             self.meter.set(min(1.0, value / 30.0))
@@ -1262,7 +1349,7 @@ class WizardWindow(Child):
             settle_until, end, done = self.capturing
             now = time.monotonic()
             if now >= settle_until and snap.raw_angles is not None:
-                self.samples.append(snap.raw_angles)
+                self.samples.append((snap.raw_angles[0], snap.raw_angles[1], snap.eye_pitch))
             left = end - now
             self.status.configure(text=f"Hold it...  {max(0, left):.0f}" if ok else "Keep your face in view",
                                   text_color=ACCENT if ok else DANGER)

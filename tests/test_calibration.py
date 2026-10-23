@@ -83,3 +83,36 @@ class CalibrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GlanceCalibrationTests(unittest.TestCase):
+    def screen_samples(self, eye0=-0.05, scale=30.0):
+        # Steering while watching the screen: eyes counter-rotate (head down -> eyes up).
+        return [(p, eye0 - p / scale) for p in [x / 2 for x in range(-24, 25)]]
+
+    def test_learns_eye_scale_and_threshold(self):
+        from headmouse.calibration import propose_glance
+        glance = [(-25.0, -0.75)] * 20 + [(0.0, -0.05)] * 10      # head and eyes down, then back
+        new, report, problems = propose_glance(config.Settings(), [-0.05] * 30, self.screen_samples(scale=25.0),
+                                               glance)
+        self.assertEqual(problems, [])
+        self.assertAlmostEqual(new.glance.eye_scale, 25.0, delta=0.5)
+        self.assertAlmostEqual(new.glance.eye_neutral, -0.05, places=3)
+        self.assertTrue(new.glance.eye_check)
+        self.assertGreater(new.glance.eye_threshold, 10)
+        self.assertLess(new.glance.eye_threshold, 30)
+        config.validate(new)
+
+    def test_turns_eye_check_off_when_glances_look_like_steering(self):
+        from headmouse.calibration import propose_glance
+        glance = [(-3.0, -0.05)] * 30                              # barely moved
+        new, _, problems = propose_glance(config.Settings(), [-0.05] * 30, self.screen_samples(), glance)
+        self.assertFalse(new.glance.eye_check)
+        self.assertTrue(problems)
+
+    def test_not_enough_data_keeps_settings(self):
+        from headmouse.calibration import propose_glance
+        s = config.Settings()
+        new, _, problems = propose_glance(s, [], [], [])
+        self.assertEqual(new, s)
+        self.assertTrue(problems)

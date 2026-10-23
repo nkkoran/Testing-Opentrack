@@ -33,6 +33,9 @@ source = "webcam"
 #    min_speed         camera speed just outside the dead zone
 #    max_speed         top camera speed
 #    full_speed_angle  head angle where top speed is reached
+#    start_delay       seconds the head must stay turned before the camera starts
+#                      moving (down defaults to 0.2 so a quick glance at the
+#                      keyboard does not move the camera)
 #    curve             shape between min and max speed:
 #                        1.0 = straight line
 #                        2.0 = slow near center, ramps up quickly further out
@@ -53,6 +56,7 @@ min_speed = 7.5
 max_speed = 180.0
 full_speed_angle = 15.0
 curve = 2.45
+start_delay = 0.0
 
 [left]
 deadzone = 3.0
@@ -60,6 +64,7 @@ min_speed = 7.5
 max_speed = 180.0
 full_speed_angle = 15.0
 curve = 2.45
+start_delay = 0.0
 
 [up]
 deadzone = 2.0
@@ -67,6 +72,7 @@ min_speed = 4.0
 max_speed = 60.0
 full_speed_angle = 10.0
 curve = 1.95
+start_delay = 0.0
 
 [down]
 deadzone = 2.0
@@ -74,6 +80,37 @@ min_speed = 4.0
 max_speed = 60.0
 full_speed_angle = 10.0
 curve = 1.95
+start_delay = 0.2
+
+
+# -----------------------------------------------------------------------------
+#  Glances: ignore looking away from the screen (e.g. down at the keyboard)
+# -----------------------------------------------------------------------------
+[glance]
+enabled = true
+# Built-in webcam only: stop while your eyes look below the screen. Your gaze is
+# worked out from head tilt plus eye direction, so tilting your head to steer
+# while watching the screen is not mistaken for a glance.
+eye_check = true
+# How far below the screen (degrees) your gaze must go to count as a glance.
+eye_threshold = 15.0
+# Degrees of gaze per unit of MediaPipe's eye-direction score, and your eye
+# direction when looking straight at the screen. Set by the setup wizard.
+eye_scale = 30.0
+eye_neutral = 0.0
+# Eye data is ignored while the eyes are this closed (0-1), e.g. blinking.
+blink_limit = 0.5
+# Stop when the head turns far beyond the normal steering range:
+# more than look_away_factor x that direction's full_speed_angle ...
+look_away = true
+look_away_factor = 1.5
+# ... or when, already past full speed, it keeps turning outward faster than this
+# (degrees/second) - nobody steers that fast, but turning to look away does. 0 = off.
+look_away_speed = 150.0
+# After a glance, wait until the head has been steady (below settle_speed
+# degrees/second) for settle_time seconds before moving again.
+settle_time = 0.3
+settle_speed = 20.0
 
 
 # -----------------------------------------------------------------------------

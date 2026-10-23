@@ -113,3 +113,56 @@ def propose(settings, source_kind, neutral, movements):
         problems.append("Tracking was jittery while you held still - check lighting and that your "
                         "face is clearly visible.")
     return new, report, problems, offset
+
+
+# --- Glances (built-in webcam only) ------------------------------------------
+# Gaze = head pitch + eye_scale x (eye score - eye_neutral). While the player steers
+# and keeps watching the screen, the eyes counter-rotate, so gaze stays put; a
+# glance at the keyboard sends both down. The wizard measures both situations.
+
+MIN_GLANCE_GAP = 8.0  # degrees between steering and glancing needed to trust the eye check
+
+
+def propose_glance(settings, neutral_eye, screen, glance):
+    """Fit the glance settings.
+
+    neutral_eye -- eye scores while looking straight at the screen
+    screen      -- (head_pitch, eye_score) while tilting the head and watching the screen;
+                   head_pitch relative to the neutral position
+    glance      -- (head_pitch, eye_score) while glancing at the keyboard and back
+    Returns (new_settings, report_lines, problems).
+    """
+    g = settings.glance
+    report, problems = [], []
+    if not neutral_eye or len(screen) < 10 or len(glance) < 10:
+        problems.append("Not enough eye data to set up glance detection - it keeps its current settings.")
+        return settings, report, problems
+    eye0 = statistics.median(neutral_eye)
+
+    # Fit head_pitch ~ -scale x (eye - eye0): how far the eyes turn per degree of head tilt.
+    xs = [e - eye0 for _, e in screen]
+    ys = [p for p, _ in screen]
+    sxx = sum(x * x for x in xs)
+    scale = g.eye_scale
+    if sxx > 1e-6 and len(xs) > 2:
+        fit = -sum(x * y for x, y in zip(xs, ys)) / sxx
+        try:
+            corr = statistics.correlation(xs, ys)
+        except statistics.StatisticsError:
+            corr = 0.0
+        if corr < -0.5 and 10 <= fit <= 80:
+            scale = round(fit, 1)
+
+    gaze = lambda p, e: p + scale * (e - eye0)
+    screen_low = _percentile([gaze(p, e) for p, e in screen], 0.05)
+    glance_low = _percentile([gaze(p, e) for p, e in glance], 0.10)
+    new_glance = dataclasses.replace(g, eye_scale=scale, eye_neutral=round(eye0, 3))
+    if glance_low < screen_low - MIN_GLANCE_GAP:
+        threshold = round(max(6.0, -(screen_low + glance_low) / 2), 1)
+        new_glance = dataclasses.replace(new_glance, eye_check=True, eye_threshold=threshold)
+        report.append(f"Glances: looking more than {threshold:g}° below the screen pauses the camera.")
+    else:
+        new_glance = dataclasses.replace(new_glance, eye_check=False)
+        problems.append("Glances at the keyboard looked too much like steering, so the eye check is off. "
+                        "Big head turns away from the screen still pause the camera.")
+    return dataclasses.replace(settings, glance=new_glance), report, problems
