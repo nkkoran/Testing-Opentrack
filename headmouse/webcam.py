@@ -19,6 +19,7 @@ from .filters import OneEuroFilter
 from .tracking import HeadSample
 
 MODEL_FILENAME = "face_landmarker.task"
+VC_REDIST_URL = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
 MODEL_URL = ("https://storage.googleapis.com/mediapipe-models/face_landmarker/"
              "face_landmarker/float16/1/face_landmarker.task")
 NOSE_TIP = 1  # landmark index used for the preview dot
@@ -130,8 +131,12 @@ class WebcamSource:
             import cv2
             import mediapipe as mp
             from mediapipe.tasks.python import BaseOptions, vision
-        except ImportError:
+        except ModuleNotFoundError:
             self._fail("webcam support is not installed - run Setup.bat")
+            return
+        except (ImportError, OSError) as e:  # usually a missing Visual C++ runtime DLL
+            self._fail(f"webcam support could not load ({e}). Install the Microsoft Visual C++ "
+                       f"Redistributable from {VC_REDIST_URL} and restart HeadMouse.")
             return
 
         model = find_model(self.base_dir, self.s.model_path)
@@ -146,7 +151,8 @@ class WebcamSource:
         self.status = "loading face model..."
         try:
             options = vision.FaceLandmarkerOptions(
-                base_options=BaseOptions(model_asset_path=str(model)),
+                # Loaded from memory: MediaPipe cannot open paths with non-English letters.
+                base_options=BaseOptions(model_asset_buffer=Path(model).read_bytes()),
                 running_mode=vision.RunningMode.VIDEO,
                 num_faces=1,
                 output_facial_transformation_matrixes=True)

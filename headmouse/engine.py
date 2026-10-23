@@ -149,8 +149,7 @@ class HeadMouse:
             self.backend.send_relative(self.result.dx, self.result.dy)
         if self.backend.failed_sends > self._reported_failures:
             if self._reported_failures == 0:
-                self._events.append(Event("warning", "Windows refused the mouse movement. If the game "
-                                          "runs as administrator, run HeadMouse as administrator too."))
+                self._events.append(Event("warning", "Windows refused to send the mouse movement."))
             self._reported_failures = self.backend.failed_sends
 
         if self.holds:

@@ -30,7 +30,9 @@ It reads your **webcam directly** (built-in face tracking, no other program need
 2. **Get HeadMouse:** on the GitHub page, click **Code → Download ZIP** and extract it, e.g. to
    `C:\HeadMouse`.
 3. **Double-click `Setup.bat`.** It installs the webcam tracking (MediaPipe), downloads Google's face
-   model (3.7 MB), runs a self-test, and puts a **HeadMouse** icon on the desktop.
+   model (3.7 MB), checks that tracking works on this PC, runs a self-test, and puts a
+   **HeadMouse** icon on the desktop. If several Python versions are installed, it uses 3.13
+   (then 3.12, 3.11, 3.14).
 
 If OpenTrack is running and using the webcam, close it before using the built-in tracking. Only
 one program can use a camera at a time.
@@ -159,7 +161,8 @@ rested in the dead zone for 0.15 s.
 | Turns the wrong way | Run the **Setup wizard**; it fixes directions automatically. |
 | Drifts with head centered | Press **Re-center** (F8) while looking straight at the screen. |
 | Doesn't turn on in the game | The game's window title must contain "Enshrouded" (`game_window_title` in the settings file). Or just press F10. |
-| Works on desktop but not in game | If Enshrouded runs as administrator, run HeadMouse as administrator too. HeadMouse shows a warning when Windows refuses. |
+| Shows ACTIVE but the game camera doesn't move | If Enshrouded runs as administrator, Windows silently blocks input from normal programs. Run HeadMouse as administrator too (right-click → Run as administrator). |
+| "Webcam support could not load" / Setup step 3 fails | Install the Microsoft Visual C++ Redistributable (<https://aka.ms/vs/17/release/vc_redist.x64.exe>), then run `Setup.bat` again. |
 | Speeds feel wrong in game | Redo **Game calibration** after changing the game's mouse sensitivity. |
 | F9/F10 also do something in the game | Pick other keys under **Sensitivity → Other** (e.g. `PAUSE`, `SCROLLLOCK`). |
 | HeadMouse closed with an error | See `headmouse_error.log` in the HeadMouse folder. |

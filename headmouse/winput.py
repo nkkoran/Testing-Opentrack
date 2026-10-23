@@ -7,6 +7,7 @@ GetAsyncKeyState, so normal keyboard input is never blocked or changed.
 
 import contextlib
 import ctypes
+import os
 import sys
 
 INPUT_MOUSE = 0
@@ -56,6 +57,9 @@ class WindowsInput:
         self._user32.GetForegroundWindow.restype = wintypes.HWND
         self._user32.GetWindowTextLengthW.argtypes = (wintypes.HWND,)
         self._user32.GetWindowTextW.argtypes = (wintypes.HWND, wintypes.LPWSTR, ctypes.c_int)
+        self._user32.GetWindowThreadProcessId.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.DWORD))
+        self._user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+        self._pid = os.getpid()
         self._input = INPUT(type=INPUT_MOUSE)
         self.failed_sends = 0
 
@@ -67,7 +71,8 @@ class WindowsInput:
         mi.time = 0
         mi.dwExtraInfo = 0
         if self._user32.SendInput(1, ctypes.byref(self._input), ctypes.sizeof(INPUT)) != 1:
-            # Usually means the target window runs as administrator and we do not.
+            # Note: when Windows blocks input to an administrator window it does NOT
+            # report failure, so this only catches other errors.
             self.failed_sends += 1
 
     def is_key_down(self, vk):
@@ -76,6 +81,12 @@ class WindowsInput:
     def foreground_window_title(self):
         hwnd = self._user32.GetForegroundWindow()
         if not hwnd:
+            return ""
+        pid = ctypes.c_ulong()
+        self._user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if pid.value == self._pid:
+            # Our own window: asking for its title waits on the Tk thread, which
+            # can deadlock while that thread is shutting the engine down.
             return ""
         length = self._user32.GetWindowTextLengthW(hwnd)
         buf = ctypes.create_unicode_buffer(length + 1)

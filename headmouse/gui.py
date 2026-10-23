@@ -277,7 +277,9 @@ class WizardWindow(_Child):
         self.neutral = None
         self.movements = {}
         self.step = -1
-        self.top.geometry("560x520")
+        self.top.minsize(560, 480)
+        buttons = tk.Frame(self.top)
+        buttons.pack(side="bottom", fill="x", pady=(8, 0))  # packed first so it is never cut off
         self.heading = tk.Label(self.top, font=_font(18, True), wraplength=520, justify="center")
         self.heading.pack(pady=(4, 6))
         self.body = tk.Label(self.top, font=_font(12), wraplength=520, justify="left")
@@ -288,8 +290,6 @@ class WizardWindow(_Child):
         self.meter.pack(pady=4)
         self.status = tk.Label(self.top, font=_font(11), fg="#444")
         self.status.pack()
-        buttons = tk.Frame(self.top)
-        buttons.pack(fill="x", pady=(8, 0))
         self.back_btn = tk.Button(buttons, text="Cancel", font=_font(12), command=self.close, width=10)
         self.back_btn.pack(side="left")
         self.next_btn = tk.Button(buttons, text="Next", font=_font(13, True), command=self.next, width=14)

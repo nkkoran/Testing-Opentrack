@@ -177,11 +177,11 @@ def is_running():
         return False
     try:
         out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq opentrack.exe", "/NH"],
-                             capture_output=True, text=True, timeout=5,
+                             capture_output=True, timeout=5,
                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
     except (OSError, subprocess.SubprocessError):
         return False
-    return "opentrack.exe" in out.lower()
+    return b"opentrack.exe" in out.lower()
 
 
 def launch_if_needed(configured=""):

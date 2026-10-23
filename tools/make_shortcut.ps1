@@ -1,6 +1,6 @@
 # Creates a "HeadMouse" shortcut on the desktop.
-# Usage: make_shortcut.ps1 [-Exe <path to HeadMouse.exe>]
-param([string]$Exe = "")
+# Usage: make_shortcut.ps1 [-PyVersion 3.13] [-Exe <path to HeadMouse.exe>]
+param([string]$Exe = "", [string]$PyVersion = "3")
 $folder = Split-Path -Parent $PSScriptRoot
 $shell = New-Object -ComObject WScript.Shell
 $link = $shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath("Desktop")) "HeadMouse.lnk"))
@@ -11,7 +11,7 @@ if ($Exe -ne "") {
     $pyw = (Get-Command pyw.exe -ErrorAction SilentlyContinue).Source
     if (-not $pyw) { Write-Host "pyw.exe (Python launcher) not found - shortcut not created."; exit 1 }
     $link.TargetPath = $pyw
-    $link.Arguments = "-3 `"$folder\run_headmouse.pyw`""
+    $link.Arguments = "-$PyVersion `"$folder\run_headmouse.pyw`""
     $link.WorkingDirectory = $folder
     $link.IconLocation = "$env:SystemRoot\System32\shell32.dll,43"
 }
