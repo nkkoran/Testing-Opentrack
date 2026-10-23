@@ -17,7 +17,7 @@ import customtkinter as ctk
 
 from . import calibration, config, opentrack_setup, updates
 from .curves import DirectionCurve
-from .engine import Engine
+from .engine import Engine, uses_eyes
 from .keys import name_from_tk_keysym
 from .safety import TrackingStatus
 
@@ -312,14 +312,35 @@ class MainWindow:
         self.message.pack(fill="x", side="bottom")
 
         root.protocol("WM_DELETE_WINDOW", self.close)
+        imported = self._import_earlier_settings(s)
+        if imported:
+            s = imported
         self.refresh()
-        if not s.general.setup_done:
+        if imported:
+            self.message.configure(text="Brought back your settings from the earlier HeadMouse.")
+            self._notice_until = time.monotonic() + 20
+        elif not s.general.setup_done:
             root.after(700, self.open_wizard)
-        elif s.tracking.source == "webcam" and s.glance.eye_check and s.glance.eye_neutral == 0.0:
+        elif uses_eyes(s) and s.tracking.source == "webcam" and s.glance.eye_neutral == 0.0:
             # Set up before glance detection existed: suggest teaching it once.
             self.message.configure(text="New: HeadMouse can ignore glances at the keyboard. "
                                         "Run the setup wizard once (Settings > Tracking) to teach it.")
             self._notice_until = time.monotonic() + 20
+
+    def _import_earlier_settings(self, s):
+        """A fresh install that finds settings from an earlier (source) install uses those."""
+        earlier = config.earlier_install_settings()
+        if not getattr(sys, "frozen", False) or s.general.setup_done or earlier is None:
+            return None
+        if earlier.resolve() == self.engine.path.resolve():
+            return None
+        try:
+            config.restore_backup(self.engine.path, earlier)
+            new = config.load(self.engine.path)[0]
+        except (OSError, config.SettingsError):
+            return None
+        self.engine.apply_settings(new, save=False)
+        return new
 
     # --- actions ---------------------------------------------------------------
 
@@ -690,6 +711,11 @@ class SettingsWindow(Child):
         ctk.CTkLabel(scroll, text="Keep the camera still when you look away from the screen, e.g. at the keyboard.",
                      font=font(11), text_color=MUTED, wraplength=470, justify="left").pack(anchor="w")
         g = self.work.glance
+        self.glance_switch = switch(scroll, "Pause the camera when I look away from the screen",
+                                    self._glance_toggled, font=font(14, "bold"), text_color=TEXT)
+        if g.enabled:
+            self.glance_switch.select()
+        self.glance_switch.pack(anchor="w", pady=(8, 0))
         self.eye_switch = switch(scroll, "Use my eyes (built-in webcam): pause when I look below the screen",
                                  lambda: self._set("glance", eye_check=bool(self.eye_switch.get())),
                                  font=font(13), text_color=TEXT)
@@ -713,6 +739,12 @@ class SettingsWindow(Child):
         self.far_row.frame.pack(fill="x", pady=(8, 0))
         self.far_row.set(g.look_away_factor)
         self._load_direction()
+
+    def _glance_toggled(self):
+        on = bool(self.glance_switch.get())
+        self._set("glance", enabled=on)
+        if on:
+            self.saved_label.configure(text="Tip: run the setup wizard (Tracking tab) so it learns your glances")
 
     def _advanced(self):
         if self.advanced.get():
@@ -987,6 +1019,19 @@ class SettingsWindow(Child):
         self.theme = segmented(scroll, ["System", "Light", "Dark"], self._theme, width=300)
         self.theme.set(self.work.general.theme.title())
         self.theme.pack(anchor="w", pady=6)
+        ctk.CTkFrame(scroll, height=1, fg_color=BORDER).pack(fill="x", pady=10)
+        ctk.CTkLabel(scroll, text="Restore earlier settings", font=font(15, "bold"), text_color=TEXT).pack(anchor="w")
+        ctk.CTkLabel(scroll, text="HeadMouse keeps a copy of your settings every time they change.",
+                     font=font(11), text_color=MUTED).pack(anchor="w")
+        self.restore_choices = self._restore_choices()
+        row = ctk.CTkFrame(scroll, fg_color="transparent")
+        row.pack(fill="x", pady=6)
+        names = list(self.restore_choices) or ["No earlier settings yet"]
+        self.restore_menu = dropdown(row, names, width=320)
+        self.restore_menu.set(names[0])
+        self.restore_menu.pack(side="left")
+        small_button(row, "Restore", self._restore, width=100,
+                     state="normal" if self.restore_choices else "disabled").pack(side="right")
         self.updates = switch(scroll, "Check for updates when HeadMouse starts", lambda: self._set(
             "general", check_for_updates=bool(self.updates.get())), font=font(13), text_color=TEXT)
         if self.work.general.check_for_updates:
@@ -995,6 +1040,34 @@ class SettingsWindow(Child):
         from . import __version__
         ctk.CTkLabel(scroll, text=f"HeadMouse {__version__}", font=font(11), text_color=MUTED).pack(
             anchor="w", pady=(8, 0))
+
+    def _restore_choices(self):
+        choices = {}
+        earlier = config.earlier_install_settings()
+        if earlier is not None and earlier.resolve() != self.engine.path.resolve():
+            choices["From the earlier HeadMouse"] = earlier
+        for b in config.list_backups(self.engine.path):
+            choices[time.strftime("Before the change on %d %b at %H:%M:%S",
+                                  time.localtime(b.stat().st_mtime))] = b
+        return choices
+
+    def _restore(self):
+        choice = self.restore_menu.get()
+        source = self.restore_choices.get(choice)
+        if source is None or not messagebox.askyesno(
+                "HeadMouse", f"Go back to these settings?\n\n{choice}\n\nYour current settings are kept "
+                             "as a backup too.", parent=self.top):
+            return
+        try:
+            config.restore_backup(self.engine.path, source)
+            restored = config.load(self.engine.path)[0]
+        except (OSError, config.SettingsError) as e:
+            messagebox.showerror("HeadMouse", f"Could not restore: {e}", parent=self.top)
+            return
+        self.engine.apply_settings(restored, save=False)
+        self.dirty = False
+        self._close_window()
+        messagebox.showinfo("HeadMouse", "Your earlier settings are back.", parent=self.main.root)
 
     def _theme(self, value):
         ctk.set_appearance_mode(value.lower())
@@ -1111,8 +1184,12 @@ class WizardWindow(Child):
     def _webcam(self):
         return self.engine.settings.tracking.source == "webcam"
 
+    def _glance_step(self):
+        """The glance step needs the webcam's eye data and glance detection switched on."""
+        return self._webcam() and uses_eyes(self.engine.settings)
+
     def _set_step(self, n):
-        total = 8 if self._webcam() else 7  # the glance step needs the webcam's eye data
+        total = 8 if self._glance_step() else 7
         n = min(n, total - 1)
         self.step_label.configure(text=f"STEP {n + 1} OF {total}")
         self.progress.set((n + 1) / total)
@@ -1240,9 +1317,10 @@ class WizardWindow(Child):
         self._set_step(99)
         old = self.engine.settings
         new, report, problems, offset = calibration.propose(old, old.tracking.source, self.neutral, self.movements)
-        if self._webcam() and "glance" in self.recorded:
+        if self._glance_step() and "glance" in self.recorded:
             new, report, problems = self._glance_settings(old, new, report, problems)
         self.result = (new, offset)
+        self.old_settings = old
         self.heading.configure(text="All set!" if not problems else "Almost there")
         self.text.configure(text="Here's what HeadMouse measured. You can fine-tune it later in Settings.")
         grid = ctk.CTkFrame(self.content, fg_color="transparent")
@@ -1255,8 +1333,18 @@ class WizardWindow(Child):
             cell.grid(row=i // 2, column=i % 2, sticky="ew", padx=4, pady=4)
             ctk.CTkLabel(cell, text=name.title(), font=font(14, "bold"), text_color=TEXT).pack(anchor="w", padx=12,
                                                                                             pady=(8, 0))
-            ctk.CTkLabel(cell, text=f"range {m.extent:.0f}°  ·  full speed at {d.full_speed_angle:g}°",
-                         font=font(12), text_color=MUTED).pack(anchor="w", padx=12, pady=(0, 8))
+            o = getattr(old, name)
+            ctk.CTkLabel(cell, text=f"range {m.extent:.0f}°", font=font(12), text_color=MUTED).pack(
+                anchor="w", padx=12)
+            ctk.CTkLabel(cell, text=f"dead zone {o.deadzone:g}° → {d.deadzone:g}°\n"
+                                    f"full speed {o.full_speed_angle:g}° → {d.full_speed_angle:g}°",
+                         font=font(11), text_color=MUTED, justify="left").pack(anchor="w", padx=12, pady=(0, 8))
+        self.update_tuning = ctk.CTkCheckBox(
+            self.content, text="Also update my sensitivity (dead zone and full-speed angle)", font=font(13),
+            text_color=TEXT, fg_color=ACCENT, hover_color=ACCENT_HOVER, border_color=MUTED)
+        if not old.general.setup_done:
+            self.update_tuning.select()  # first setup: use the measurements
+        self.update_tuning.pack(anchor="w", pady=(8, 0))
         for line in [r for r in report if r.startswith("Glances")]:
             ctk.CTkLabel(self.content, text=line, font=font(12), text_color=TEXT, wraplength=540,
                          justify="left", anchor="w").pack(fill="x", pady=(6, 0))
@@ -1282,6 +1370,10 @@ class WizardWindow(Child):
             self._capture(6.0, 0.3, self._glance_done)
         else:
             new, offset = self.result
+            if not self.update_tuning.get():
+                # Keep the player's own sensitivity; only the tracking calibration is updated.
+                old = self.old_settings
+                new = dataclasses.replace(new, right=old.right, left=old.left, up=old.up, down=old.down)
             self.engine.apply_settings(replace(new, "general", setup_done=True))
             if new.tracking.source == "opentrack":
                 self.engine.set_offset(offset)
@@ -1310,7 +1402,7 @@ class WizardWindow(Child):
         self.recorded[name] = self.samples
         if self.dir_index + 1 < len(self.STEPS):
             self.show_direction(self.dir_index + 1)
-        elif self._webcam():
+        elif self._glance_step():
             self.show_glance()
         else:
             self.show_results()

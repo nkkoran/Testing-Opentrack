@@ -199,12 +199,19 @@ class _NoSource:
 def make_source(settings, base_dir):
     if settings.tracking.source == "webcam":
         from .webcam import WebcamSource
-        return WebcamSource(settings.webcam, base_dir)
+        return WebcamSource(settings.webcam, base_dir, eyes=uses_eyes(settings))
     return OpenTrackUDPSource(settings.opentrack.listen_address, settings.opentrack.port)
+
+
+def uses_eyes(settings):
+    """True when the glance eye check needs eye data from the webcam."""
+    return settings.glance.enabled and settings.glance.eye_check
 
 
 def _restart_needed(old, new):
     if old.tracking.source != new.tracking.source:
+        return True
+    if new.tracking.source == "webcam" and uses_eyes(old) != uses_eyes(new):
         return True
     if new.tracking.source == "opentrack":
         return (old.opentrack.listen_address, old.opentrack.port) != \

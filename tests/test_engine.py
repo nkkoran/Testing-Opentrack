@@ -290,7 +290,7 @@ class WebcamIntegrationTest(unittest.TestCase):
             out.release()
             ws = dataclasses.replace(config.WebcamSettings(),
                                      model_path=str(assets / "face_landmarker.task"))
-            src = WebcamSource(ws, d, open_camera=lambda: cv2.VideoCapture(video))
+            src = WebcamSource(ws, d, open_camera=lambda: cv2.VideoCapture(video), eyes=True)
             src.preview_wanted = True
             yaws = []
             src._handle_orig = src._handle

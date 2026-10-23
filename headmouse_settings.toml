@@ -34,8 +34,8 @@ source = "webcam"
 #    max_speed         top camera speed
 #    full_speed_angle  head angle where top speed is reached
 #    start_delay       seconds the head must stay turned before the camera starts
-#                      moving (down defaults to 0.2 so a quick glance at the
-#                      keyboard does not move the camera)
+#                      moving (0 = immediately; e.g. 0.2 for down lets you glance
+#                      at the keyboard without moving the camera)
 #    curve             shape between min and max speed:
 #                        1.0 = straight line
 #                        2.0 = slow near center, ramps up quickly further out
@@ -80,14 +80,15 @@ min_speed = 4.0
 max_speed = 60.0
 full_speed_angle = 10.0
 curve = 1.95
-start_delay = 0.2
+start_delay = 0.0
 
 
 # -----------------------------------------------------------------------------
 #  Glances: ignore looking away from the screen (e.g. down at the keyboard)
 # -----------------------------------------------------------------------------
 [glance]
-enabled = true
+# Off unless you switch it on (Settings > Feel > Glancing away).
+enabled = false
 # Built-in webcam only: stop while your eyes look below the screen. Your gaze is
 # worked out from head tilt plus eye direction, so tilting your head to steer
 # while watching the screen is not mistaken for a glance.

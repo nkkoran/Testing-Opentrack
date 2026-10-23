@@ -11,6 +11,9 @@ SCALE = 30.0          # eye score -> degrees
 
 
 def settings(**sections):
+    """Settings with the glance features switched ON (they are off by default)."""
+    sections["glance"] = {"enabled": True, **sections.get("glance", {})}
+    sections["down"] = {"start_delay": 0.2, **sections.get("down", {})}
     return config.from_dict(sections)[0]
 
 
@@ -143,6 +146,30 @@ class WithoutEyeDataTests(unittest.TestCase):
         p.run(ramp(0, -25, 0.15))
         p.hold(-25.0, 0.5)
         self.assertGreater(p.dy, 0)
+
+
+class DefaultsTests(unittest.TestCase):
+    def test_defaults_behave_exactly_like_version_1_0(self):
+        # New features are opt-in: with default settings nothing pauses or delays movement.
+        defaults = config.Settings()
+        self.assertFalse(defaults.glance.enabled)
+        self.assertEqual([getattr(defaults, d).start_delay for d in ("right", "left", "up", "down")], [0.0] * 4)
+        p = Player(defaults)
+        p.run(ramp(0, -25, 0.15), eyes=-0.75)
+        p.hold(-25.0, 0.5, eye=-0.75)
+        self.assertFalse(p.glanced)
+        self.assertGreater(p.dy, 0)
+        q = Player(defaults)
+        q.hold(-5.0, 0.1)
+        self.assertGreater(q.dy, 0)                 # no start delay
+
+    def test_eye_processing_only_when_needed(self):
+        from headmouse.engine import uses_eyes, _restart_needed
+        off = config.Settings()
+        on = config.from_dict({"glance": {"enabled": True}})[0]
+        self.assertFalse(uses_eyes(off))
+        self.assertTrue(uses_eyes(on))
+        self.assertTrue(_restart_needed(off, on))
 
 
 class EngineAndWebcamTests(unittest.TestCase):

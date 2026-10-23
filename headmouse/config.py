@@ -6,7 +6,10 @@ The section and field names below match the settings file exactly.
 
 import dataclasses
 import math
+import os
 import re
+import shutil
+import time
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -130,7 +133,7 @@ def _vertical(start_delay=0.0):
 
 @dataclass
 class GlanceSettings:
-    enabled: bool = True
+    enabled: bool = False      # opt-in: new behaviour must never change existing setups
     eye_check: bool = True
     eye_threshold: float = 15.0
     eye_scale: float = 30.0
@@ -157,7 +160,7 @@ class Settings:
     right: DirectionSettings = field(default_factory=_horizontal)
     left: DirectionSettings = field(default_factory=_horizontal)
     up: DirectionSettings = field(default_factory=_vertical)
-    down: DirectionSettings = field(default_factory=lambda: _vertical(start_delay=0.2))
+    down: DirectionSettings = field(default_factory=_vertical)
     glance: GlanceSettings = field(default_factory=GlanceSettings)
 
     def source_settings(self):
@@ -371,12 +374,69 @@ def update_text(text, updates):
     return "\n".join(lines) + "\n"
 
 
+BACKUPS_KEPT = 20
+
+
+def backup_folder(path):
+    return Path(path).parent / "backups"
+
+
+def make_backup(path):
+    """Copy the settings file into backups/ (newest BACKUPS_KEPT are kept). Returns the copy."""
+    path = Path(path)
+    if not path.exists():
+        return None
+    folder = backup_folder(path)
+    folder.mkdir(exist_ok=True)
+    stamp = time.strftime("%Y-%m-%d_%H-%M-%S")
+    dest = folder / f"{path.stem}_{stamp}{path.suffix}"
+    n = 1
+    while dest.exists():
+        n += 1
+        dest = folder / f"{path.stem}_{stamp}_{n}{path.suffix}"
+    shutil.copy2(path, dest)
+    for old in list_backups(path)[BACKUPS_KEPT:]:
+        old.unlink(missing_ok=True)
+    return dest
+
+
+def list_backups(path):
+    """Backups of the settings file, newest first."""
+    folder = backup_folder(path)
+    stem = Path(path).stem
+    found = folder.glob(f"{stem}_*.toml") if folder.is_dir() else []
+    return sorted(found, key=lambda p: p.stat().st_mtime, reverse=True)
+
+
+def restore_backup(path, backup):
+    """Replace the settings file with `backup` (after backing up the current one)."""
+    from_dict(tomllib.loads(Path(backup).read_text(encoding="utf-8")))  # must be valid
+    make_backup(path)
+    tmp = Path(path).with_suffix(".tmp")
+    shutil.copyfile(backup, tmp)
+    os.replace(tmp, path)
+
+
+def earlier_install_settings():
+    """Settings left by a HeadMouse installed from source (before the installer existed), if any."""
+    local = os.environ.get("LOCALAPPDATA")
+    if not local:
+        return None
+    old = Path(local) / "HeadMouse" / "headmouse_settings.toml"
+    return old if old.is_file() else None
+
+
 def save_values(path, updates):
-    """Write {section: {key: value}} into the settings file, keeping comments."""
+    """Write {section: {key: value}} into the settings file, keeping comments.
+
+    The previous file is kept in backups/ first, so any change can be undone.
+    """
     path = Path(path)
     text = path.read_text(encoding="utf-8") if path.exists() else ""
     new_text = update_text(text, updates)
     from_dict(tomllib.loads(new_text))  # never write a file that would not load
+    if new_text != text:
+        make_backup(path)
     tmp = path.with_suffix(".tmp")
     tmp.write_text(new_text, encoding="utf-8")
     tmp.replace(path)

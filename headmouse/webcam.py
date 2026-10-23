@@ -87,9 +87,10 @@ def download_model(dest):
 class WebcamSource:
     """Reads the webcam on a background thread and estimates head angles."""
 
-    def __init__(self, webcam_settings, base_dir, clock=time.perf_counter, open_camera=None):
+    def __init__(self, webcam_settings, base_dir, clock=time.perf_counter, open_camera=None, eyes=False):
         self.s = webcam_settings
         self._open_camera = open_camera  # tests pass a function returning a cv2.VideoCapture
+        self.eyes = eyes  # also read eye direction (costs extra time per frame, so only when needed)
         self.base_dir = Path(base_dir)
         self._clock = clock
         self._lock = threading.Lock()
@@ -170,7 +171,7 @@ class WebcamSource:
                 base_options=BaseOptions(model_asset_buffer=Path(model).read_bytes()),
                 running_mode=vision.RunningMode.VIDEO,
                 num_faces=1,
-                output_face_blendshapes=True,
+                output_face_blendshapes=self.eyes,
                 output_facial_transformation_matrixes=True)
             landmarker = vision.FaceLandmarker.create_from_options(options)
         except Exception as e:  # MediaPipe raises several exception types

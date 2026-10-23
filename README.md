@@ -137,7 +137,7 @@ with a red dot where your head is right now.
 | Head turn for full speed | Smaller = less head movement needed |
 | Top speed | Fastest turning |
 | Dead zone | How far you can move before the camera starts turning |
-| Start delay | Wait this long before turning (down: 0.2 s, so a quick glance doesn't move the camera) |
+| Start delay | Wait this long before turning (0 = immediately; e.g. 0.2 s for down lets you glance without moving the camera) |
 | Slowest speed *(advanced)* | Speed just outside the dead zone |
 | Curve *(advanced)* | 1 = even; higher = finer control near center, faster further out |
 
@@ -147,24 +147,32 @@ precision mode is.
 Everything is stored in `headmouse_settings.toml` (with explanations). It can also be edited in
 Notepad, and changes apply within a second.
 
-### Glancing away (e.g. at the keyboard)
+### Glancing away (e.g. at the keyboard): optional
 
-HeadMouse keeps the camera still when you look away from the screen:
+**Off unless you switch it on**, under **Settings → Feel → Glancing away → "Pause the camera when
+I look away from the screen"**. Then run the setup wizard once so it learns your glances (it adds a
+"Glance at your keyboard" step).
+
+When it's on, HeadMouse keeps the camera still while you look away from the screen:
 - **Eyes (built-in webcam):** it combines head tilt with eye direction to work out where you're
-  looking. Steering while watching the screen keeps your gaze on the screen, because your eyes
-  roll the other way. Looking down at the keyboard sends your gaze below it, and the camera
-  pauses. The eyes move first, so it usually pauses before the head has moved at all. Blinks
-  are ignored.
+  looking. Steering while watching the screen keeps your gaze on the screen; looking down at the
+  keyboard sends it below, and the camera pauses. Blinks are ignored.
 - **Far away:** a head turn well beyond your normal steering range (1.5× the full-speed angle),
   or a very fast turn past full speed, counts as looking away. This works with OpenTrack too.
-- **Start delay:** looking down only starts turning the camera after 0.2 s.
 
-The status card shows **Looking away** meanwhile. Movement resumes once you're looking at the
-screen again and your head has settled, so coming back up doesn't move the camera either.
+The status card shows **Looking away** meanwhile. Movement resumes once you look back and your
+head has settled. A simpler alternative without eye tracking is a **Start delay** of about 0.2 s
+for Down.
 
-The setup wizard's **Glance at your keyboard** step learns your own eye movement. If you set up
-HeadMouse before this feature existed, run the wizard once more (Settings → Tracking). Adjust or
-switch it off under **Settings → Feel → Glancing away**.
+### Your settings are safe
+
+- **Every change is backed up.** To go back, use **Settings → Keys & sound → Restore earlier
+  settings** (scroll down).
+- **Running the setup wizard again doesn't replace your sensitivity** unless you tick "Also update
+  my sensitivity" on its last page. It shows the old and new values first.
+- **Settings from an older copy of HeadMouse** (installed with the one-line command before the
+  installer existed) are offered there as "From the earlier HeadMouse". A fresh install uses them
+  automatically.
 
 ## 7. Using OpenTrack instead of the webcam tracker
 
@@ -200,7 +208,8 @@ rested in the dead zone for 0.15 s.
 | Movement is jittery | **Settings → Tracking → Steadiness**: move it left. Or raise the dead zone. |
 | Movement feels laggy | Move Steadiness a little to the right. |
 | Turns the wrong way | Run the **Setup wizard**; it fixes directions automatically. |
-| Camera moves when glancing at the keyboard | Run the setup wizard again (it learns your glances), or under **Settings → Feel → Glancing away** lower "How far below the screen". With OpenTrack, raise the down **Start delay**. |
+| Camera moves when glancing at the keyboard | Switch on **Settings → Feel → Glancing away** and run the setup wizard, or set the Down **Start delay** to about 0.2 s. |
+| Settings changed or lost | **Settings → Keys & sound → Restore earlier settings** (scroll down). |
 | Camera pauses while steering normally ("Looking away") | Under **Settings → Feel → Glancing away**, raise "How far below the screen" or "Far away means", or switch the eye check off. |
 | Drifts with head centered | Press **Re-center** (F8) while looking straight at the screen. |
 | Doesn't turn on in the game | The game's window title must contain "Enshrouded" (`game_window_title` in the settings file). Or just press F10. |
