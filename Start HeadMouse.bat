@@ -2,5 +2,5 @@
 rem Opens the HeadMouse window (same as the desktop shortcut, but with a console for messages).
 cd /d "%~dp0"
 call tools\find_python.bat || (pause & exit /b 1)
-py -%PYV% run_headmouse.py %*
+%PY% run_headmouse.py %*
 if errorlevel 1 pause

@@ -9,6 +9,7 @@ import dataclasses
 import sys
 import time
 import tkinter as tk
+from pathlib import Path
 from tkinter import messagebox
 
 import customtkinter as ctk
@@ -45,6 +46,16 @@ STATE_COLORS = {
 }
 DIRECTIONS = ("right", "left", "up", "down")
 PAIRS = {"right": "left", "left": "right", "up": "down", "down": "up"}
+
+
+ICON = None  # path to headmouse.ico, set by run_gui
+
+
+def set_icon(window, delay=0):
+    """Use the HeadMouse icon (Windows). CustomTkinter sets its own on new windows, so allow a delay."""
+    if ICON and sys.platform == "win32":
+        apply = lambda: window.winfo_exists() and window.iconbitmap(ICON)
+        window.after(delay, apply) if delay else apply()
 
 
 def pick(pair):
@@ -400,6 +411,7 @@ class Child:
         self.top.configure(fg_color=BG)
         self.top.transient(main.root)
         self.top.protocol("WM_DELETE_WINDOW", self.close)
+        set_icon(self.top, delay=250)
         self.top.after(150, self.top.lift)  # CustomTkinter windows can open behind on Windows
         self.top.after(160, self.top.focus_force)
 
@@ -1230,9 +1242,15 @@ def _initial_theme(settings_path):
 
 
 def run_gui(settings_path, base_dir, dry_run=False, engine=None):
+    global ICON
+    for folder in (Path(base_dir), Path(getattr(sys, "_MEIPASS", base_dir))):
+        if (folder / "headmouse.ico").is_file():
+            ICON = str(folder / "headmouse.ico")
+            break
     ctk.set_appearance_mode(_initial_theme(settings_path))
     ctk.set_default_color_theme("blue")
     root = ctk.CTk()
+    set_icon(root)
     engine = engine or Engine(settings_path, base_dir, dry_run=dry_run)
     try:
         engine.start()

@@ -1,20 +1,22 @@
-# Creates a "HeadMouse" shortcut on the desktop.
-# Usage: make_shortcut.ps1 [-PyVersion 3.13] [-Exe <path to HeadMouse.exe>]
-param([string]$Exe = "", [string]$PyVersion = "3")
+# Creates "HeadMouse" shortcuts on the desktop and in the Start menu.
+# Usage: make_shortcut.ps1 -Target <program> [-Arguments <text>] [-WorkingDirectory <folder>]
+param(
+    [Parameter(Mandatory = $true)][string]$Target,
+    [string]$Arguments = "",
+    [string]$WorkingDirectory = ""
+)
 $folder = Split-Path -Parent $PSScriptRoot
+if (-not $WorkingDirectory) { $WorkingDirectory = Split-Path -Parent $Target }
+$icon = Join-Path $folder "headmouse.ico"
+if (-not (Test-Path -LiteralPath $icon)) { $icon = "$env:SystemRoot\System32\shell32.dll,43" }
 $shell = New-Object -ComObject WScript.Shell
-$link = $shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath("Desktop")) "HeadMouse.lnk"))
-if ($Exe -ne "") {
-    $link.TargetPath = $Exe
-    $link.WorkingDirectory = Split-Path -Parent $Exe
-} else {
-    $pyw = (Get-Command pyw.exe -ErrorAction SilentlyContinue).Source
-    if (-not $pyw) { Write-Host "pyw.exe (Python launcher) not found - shortcut not created."; exit 1 }
-    $link.TargetPath = $pyw
-    $link.Arguments = "-$PyVersion `"$folder\run_headmouse.pyw`""
-    $link.WorkingDirectory = $folder
-    $link.IconLocation = "$env:SystemRoot\System32\shell32.dll,43"
+foreach ($place in @([Environment]::GetFolderPath("Desktop"), [Environment]::GetFolderPath("Programs"))) {
+    $link = $shell.CreateShortcut((Join-Path $place "HeadMouse.lnk"))
+    $link.TargetPath = $Target
+    $link.Arguments = $Arguments
+    $link.WorkingDirectory = $WorkingDirectory
+    $link.IconLocation = $icon
+    $link.Description = "HeadMouse - head control for games"
+    $link.Save()
 }
-$link.Description = "HeadMouse - head control for games"
-$link.Save()
-Write-Host "Created desktop shortcut: HeadMouse"
+Write-Host "Created HeadMouse icons on the desktop and in the Start menu."

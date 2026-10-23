@@ -23,23 +23,31 @@ It reads your **webcam directly** (built-in face tracking, no other program need
 
 ---
 
-## 1. One-time setup (about 10 minutes)
+## 1. Install (one step, about 5–10 minutes)
 
-1. **Install Python** 3.13 from <https://www.python.org/downloads/windows/> (3.11 or newer works).
-   In the installer, tick **"Add python.exe to PATH"**.
-2. **Get HeadMouse:** on the GitHub page, click **Code → Download ZIP** and extract it, e.g. to
-   `C:\HeadMouse`.
-3. **Double-click `Setup.bat`.** It installs the webcam tracking (MediaPipe), downloads Google's face
-   model (3.7 MB), checks that tracking works on this PC, runs a self-test, and puts a
-   **HeadMouse** icon on the desktop. If several Python versions are installed, it uses 3.13
-   (then 3.12, 3.11, 3.14).
+Press **Win + R**, paste this line, and press **Enter**:
 
-If OpenTrack is running and using the webcam, close it before using the built-in tracking. Only
-one program can use a camera at a time.
+```
+powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/nkkoran/Testing-Opentrack/master/install.ps1 | iex"
+```
+
+A window shows the progress. It:
+- downloads HeadMouse into `%LOCALAPPDATA%\HeadMouse`
+- installs Python 3.13 if it's missing (per-user, no admin needed; via winget, or from python.org)
+- installs the webcam tracking and downloads Google's face model
+- checks that tracking works, installing the Microsoft Visual C++ runtime if it's missing (Windows
+  asks for permission once)
+- puts **HeadMouse** icons on the desktop and in the Start menu
+- starts HeadMouse
+
+**To update later,** run the same line again. Your settings are kept.
+
+*Without the one-liner:* download the ZIP (**Code → Download ZIP** on GitHub), extract it, and
+double-click `Setup.bat`. It does the same, minus the download.
 
 ## 2. First start: the setup wizard
 
-Double-click **HeadMouse** on the desktop. The first time, the **setup wizard** opens by itself:
+HeadMouse opens by itself after installing, and the first time the **setup wizard** opens too:
 
 1. **Choose the tracker.** "Built-in webcam" is recommended. A camera preview shows a green dot on
    your nose when your face is found.
@@ -59,7 +67,8 @@ from the main window.
 when centered. Hold **F9**: it freezes. Cover the camera: within a second the window turns red
 (**NO TRACKING**) and you hear a low double tone.
 
-**Game calibration:** this makes the speeds real in-game degrees per second.
+**Game calibration (optional, recommended):** this makes the speeds real in-game degrees per
+second. Skip it if turning already feels right.
 1. Start Enshrouded and set its mouse sensitivity the way you like it.
 2. In HeadMouse open **Settings → Game**, press **Test turn in 5 seconds**, and click into the game.
    You can also press **F6** in the game while that tab is open.
@@ -159,7 +168,7 @@ rested in the dead zone for 0.15 s.
 
 | Problem | Fix |
 |---|---|
-| "Webcam support is not installed" | Run `Setup.bat` again and watch for errors in step 1. |
+| "Webcam support is not installed" | Run the install line (or `Setup.bat`) again and watch for errors in step 2. |
 | "Camera 0 not found or busy" | Close OpenTrack, Zoom, Teams, etc. Wrong camera? Choose another in **Settings → Tracking**. |
 | "Looking for your face" stays red | Face the camera, put light on your face (not behind you), and move closer. |
 | Movement is jittery | **Settings → Tracking → Steadiness**: move it left. Or raise the dead zone. |
@@ -168,10 +177,10 @@ rested in the dead zone for 0.15 s.
 | Drifts with head centered | Press **Re-center** (F8) while looking straight at the screen. |
 | Doesn't turn on in the game | The game's window title must contain "Enshrouded" (`game_window_title` in the settings file). Or just press F10. |
 | Shows ACTIVE but the game camera doesn't move | If Enshrouded runs as administrator, Windows silently blocks input from normal programs. Run HeadMouse as administrator too (right-click → Run as administrator). |
-| "Webcam support could not load" / Setup step 3 fails | Install the Microsoft Visual C++ Redistributable (<https://aka.ms/vs/17/release/vc_redist.x64.exe>), then run `Setup.bat` again. |
+| "Webcam support could not load" | Setup installs the Microsoft Visual C++ runtime when needed. If permission was refused, run setup again and click Yes, or install it from <https://aka.ms/vs/17/release/vc_redist.x64.exe>. |
 | Speeds feel wrong in game | Redo the calibration in **Settings → Game** after changing the game's mouse sensitivity. |
 | F9/F10 also do something in the game | Pick other keys under **Settings → Keys & sound** (e.g. Pause or Scroll Lock). |
-| HeadMouse closed with an error | See `headmouse_error.log` in the HeadMouse folder. |
+| HeadMouse closed with an error | See `headmouse_error.log` in the HeadMouse folder (`%LOCALAPPDATA%\HeadMouse` when installed with the one-liner). |
 | Windows Firewall asks about Python | Only needed for OpenTrack mode (local only). Allowing *Private networks* is enough. |
 
 ## 10. Optional: a standalone HeadMouse.exe
