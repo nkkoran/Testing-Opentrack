@@ -128,6 +128,32 @@ class FilterAndMathTests(unittest.TestCase):
         self.assertAlmostEqual(roll, 4, places=6)
 
 
+class ModelDownloadTests(unittest.TestCase):
+    def fake_download(self, payload):
+        import urllib.request
+        from unittest import mock
+        return mock.patch.object(urllib.request, "urlopen", lambda url, timeout: io.BytesIO(payload))
+
+    def test_valid_model_with_leading_zero_bytes(self):
+        import os as _os
+        import zipfile
+        from headmouse.webcam import download_model
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as z:
+            z.writestr("model.tflite", _os.urandom(1_200_000))
+        with tempfile.TemporaryDirectory() as d, self.fake_download(b"\0\0" + buf.getvalue()):
+            dest = download_model(Path(d) / "face_landmarker.task")
+            self.assertTrue(dest.exists())
+            self.assertFalse((Path(d) / "face_landmarker.part").exists())
+
+    def test_damaged_download_is_removed(self):
+        from headmouse.webcam import download_model
+        with tempfile.TemporaryDirectory() as d, self.fake_download(b"<html>error</html>" * 100000):
+            with self.assertRaises(OSError):
+                download_model(Path(d) / "face_landmarker.task")
+            self.assertEqual(list(Path(d).iterdir()), [])
+
+
 class AutoEnableTests(unittest.TestCase):
     def test_turns_on_in_game_and_off_outside(self):
         s = config.Settings()

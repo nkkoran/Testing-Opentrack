@@ -13,6 +13,7 @@ import sys
 import threading
 import time
 import urllib.request
+import zipfile
 from pathlib import Path
 
 from .filters import OneEuroFilter
@@ -61,10 +62,11 @@ def download_model(dest):
     with urllib.request.urlopen(MODEL_URL, timeout=60) as resp, tmp.open("wb") as f:
         while chunk := resp.read(65536):
             f.write(chunk)
-    with tmp.open("rb") as f:
-        if f.read(2) != b"PK" or tmp.stat().st_size < 1_000_000:
-            tmp.unlink()
-            raise OSError("downloaded face model looks damaged")
+    # The model is a zip archive (with two leading zero bytes, so check the zip directory,
+    # not the first bytes). The file must be closed before it can be deleted on Windows.
+    if tmp.stat().st_size < 1_000_000 or not zipfile.is_zipfile(tmp):
+        tmp.unlink()
+        raise OSError("downloaded face model looks damaged")
     tmp.replace(dest)
     return dest
 
