@@ -2108,7 +2108,11 @@ class QuickFixWindow(Child):
             w.destroy()
         s = self.current
         mode = config.axis_modes(s)[0 if self.axis == "x" else 1]
-        self.mode_label.configure(text=f"Uses {SettingsWindow.MODE_LABELS[mode]} (change it in Settings > Feel)")
+        used = [config.SITUATION_NAMES[n] for n in config.SITUATIONS if getattr(s.situations, f"{n}_preset")]
+        note = (f"\nThese change your normal feel. The {', '.join(used)} feel is its own preset "
+                "(Settings > Feel).") if used else ""
+        self.mode_label.configure(text=f"Uses {SettingsWindow.MODE_LABELS[mode]} (change it in Settings > Feel)"
+                                       + note, wraplength=440, justify="left")
         for fix in quickfix.available(s, self.axis):
             secondary_button(self.fix_frame, fix.label, lambda k=fix.key: self.apply(k), height=40,
                              anchor="w").pack(fill="x", pady=3)

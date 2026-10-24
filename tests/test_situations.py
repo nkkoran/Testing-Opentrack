@@ -74,12 +74,19 @@ class SituationTests(unittest.TestCase):
         backend.keys_down.add(config.key_code("RIGHTMOUSE"))
         self.ticks(app, src, 0.05)
         self.assertEqual(app.situation, "aim")
-        backend.pointer = True                                   # the game shows a pointer
+        backend.pointer = True                                   # the game shows a pointer...
         self.ticks(app, src, 0.05)
+        self.assertEqual(app.situation, "aim")                   # ...a flicker doesn't count
+        self.ticks(app, src, 0.3)
         self.assertEqual(app.situation, "menu")
         backend.pointer = False
         self.ticks(app, src, 0.05)
+        self.assertEqual(app.situation, "menu")                  # a brief hide mid-menu neither
+        self.ticks(app, src, 0.3)
         self.assertEqual(app.situation, "aim")
+        app.practice = True                                      # the practice game: normal feel only
+        self.ticks(app, src, 0.05)
+        self.assertIsNone(app.situation)
 
     def test_pointer_only_counts_in_the_game_window(self):
         s_extra = {"game_window_title": "Enshrouded"}
@@ -89,10 +96,10 @@ class SituationTests(unittest.TestCase):
         app.apply_settings(s, {"menu": aim_feel(s)})
         backend.pointer = True
         backend.window_title = "Desktop"
-        self.ticks(app, src, 0.1)
+        self.ticks(app, src, 0.6)
         self.assertIsNone(app.situation)
         backend.window_title = "Enshrouded"
-        self.ticks(app, src, 0.1)
+        self.ticks(app, src, 0.6)
         self.assertEqual(app.situation, "menu")
 
     def test_switching_does_not_jump(self):

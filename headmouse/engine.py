@@ -27,6 +27,7 @@ from .winput import KeyReader, NullInput, WindowsInput, high_resolution_timer
 
 KEY_NAMES = ("pause_hold", "enable_toggle", "recenter", "precision_hold", "calibrate_turn")
 FOCUS_STABLE_SECONDS = 0.4   # the game window must stay (in)active this long before auto on/off
+POINTER_STABLE_SECONDS = 0.2  # the game's mouse pointer must stay shown/hidden this long to switch feel
 LOST_BEEP_SECONDS = 1.0      # only beep "tracking lost" when it lasts this long
 log = logging.getLogger("headmouse")
 
@@ -80,6 +81,8 @@ class HeadMouse:
         self.precision_on = False   # precision key in toggle mode
         self.situation = None       # "menu", "aim", "build" or None (normal feel)
         self._toggled = {}          # situations switched on with a tap
+        self._pointer = False       # the game shows a mouse pointer (steady for POINTER_STABLE_SECONDS)
+        self._pointer_seen, self._pointer_since = False, 0.0
         self.settings = None
         self._events = []
         self._last_tick = None
@@ -126,7 +129,16 @@ class HeadMouse:
         self._events.append(Event("recentered", f"Re-centered (yaw {self.offset[0]:+.1f}, "
                                                 f"pitch {self.offset[1]:+.1f})", self.offset))
 
-    def _update_situation(self, focused):
+    def _pointer_steady(self, now):
+        """Pointer shown/hidden, ignoring flickers (loading screens, the moment between menus)."""
+        seen = bool(self.backend.pointer_visible())
+        if seen != self._pointer_seen:
+            self._pointer_seen, self._pointer_since = seen, now
+        if seen != self._pointer and now - self._pointer_since >= POINTER_STABLE_SECONDS:
+            self._pointer = seen
+        return self._pointer
+
+    def _update_situation(self, focused, now):
         """Pick the feel for what the player is doing (aiming, building, a menu) and switch to it."""
         s = self.settings.situations
         wanted = None
@@ -139,9 +151,9 @@ class HeadMouse:
             else:
                 on = self.keys.held(vk)
             if name == "menu" and s.menu_pointer and focused is not False:
-                on = on or self.backend.pointer_visible()
-            if on and wanted is None and name in self.controllers:
-                wanted = name
+                on = self._pointer_steady(now) or on
+            if on and wanted is None and name in self.controllers and not self.practice:
+                wanted = name   # (the practice game always measures the normal feel)
         if wanted != self.situation:
             new = self.controllers[wanted]
             new.take_over(self.controller)
@@ -190,7 +202,7 @@ class HeadMouse:
         else:
             precision = self.keys.held(self.vk["precision_hold"])
 
-        self._update_situation(focused)
+        self._update_situation(focused, now)
 
         sample = self.source.latest()
         self.tracking, raw = self.monitor.check(sample, now)
@@ -361,6 +373,7 @@ class Engine:
         self.calibration_mode = False
         self.settings = None
         self.source = None
+        self._feel_problems = set()
         self.app = None
 
     # --- lifecycle ---------------------------------------------------------
@@ -524,7 +537,7 @@ class Engine:
 
     def _feels(self, settings):
         """{situation: Settings} for each situation with a preset chosen."""
-        feels = {}
+        feels, problems = {}, set()
         for name in SITUATIONS:
             preset = getattr(settings.situations, f"{name}_preset")
             if not preset:
@@ -532,7 +545,10 @@ class Engine:
             try:
                 feels[name] = config.load_preset(self.path, preset, settings)
             except config.SettingsError as e:
-                self._message("warning", f"{SITUATION_NAMES[name]} feel not used: {e}")
+                problems.add(f"{SITUATION_NAMES[name]} feel not used: {e}")
+        for text in problems - self._feel_problems:   # say it once, not on every slider move
+            self._message("warning", text)
+        self._feel_problems = problems
         return feels
 
     def _read_preset_mtime(self):
