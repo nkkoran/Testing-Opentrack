@@ -233,7 +233,7 @@ class HeadView:
         c, w, h, k = self.canvas, self.w, self.h, self.scale
         c.delete("all")
         c.configure(bg=pick(bg))
-        s = snap.settings
+        s = snap.feel or snap.settings   # what moves the camera now (e.g. the aiming feel)
         cx, cy = w / 2, h / 2
         xr = max(s.right.full_speed_angle, s.left.full_speed_angle) * 1.3
         yr = max(s.up.full_speed_angle, s.down.full_speed_angle) * 1.3
@@ -268,6 +268,8 @@ class HeadView:
         c.create_oval(x - r - 5 * k, y - r - 5 * k, x + r + 5 * k, y + r + 5 * k, fill="", outline=color, width=2)
         c.create_oval(x - r, y - r, x + r, y + r, fill=color, outline=pick(bg), width=3)
         c.create_text(12 * k, 10 * k, text="your head", anchor="nw", fill=muted, font=(FAMILY, 9))
+        area = "mouse-like area" if "hybrid" in config.axis_modes(s) else "dead zone"
+        c.create_text(12 * k, h - 8 * k, text=f"green: {area}", anchor="sw", fill=muted, font=(FAMILY, 9))
 
 
 class MainWindow:

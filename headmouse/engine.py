@@ -390,6 +390,7 @@ class Snapshot:
     gestures: tuple = ()           # gestures active now
     buttons: tuple = ()            # mouse buttons HeadMouse holds down now
     frozen_by_action: bool = False # frozen by a click action (not the freeze key)
+    feel: object = None            # the settings moving the camera now (a situation's feel, or settings)
     dry_run: bool = False
     settings: object = None
 
@@ -703,7 +704,7 @@ class Engine:
             glancing=r.glancing, gaze=r.gaze, eye_pitch=app.eye_pitch, rate=self.rate,
             practice_camera=tuple(app.practice_camera), situation=app.situation,
             face=dict(app.gestures.level), gestures=tuple(sorted(app.gestures.active)),
-            buttons=tuple(sorted(app.buttons_down)), frozen_by_action=app.action_freeze,
+            buttons=tuple(sorted(app.buttons_down)), frozen_by_action=app.action_freeze, feel=app.controller.s,
             settings=self.settings)
         with self._lock:
             self._snapshot = snap
