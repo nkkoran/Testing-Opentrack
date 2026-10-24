@@ -1,0 +1,232 @@
+# =============================================================================
+#  HeadMouse settings
+# =============================================================================
+#  Most of these can be changed from the HeadMouse window (Sensitivity, Setup
+#  wizard, Game calibration), which saves them here for you.
+#
+#  You can also edit this file with Notepad and SAVE. A running HeadMouse picks
+#  up changes within about one second - no restart needed. If you make a typing
+#  mistake, HeadMouse shows the problem and keeps using the previous settings.
+#
+#  Angles are in degrees of head rotation.
+#  Speeds are in degrees per second of camera rotation in the game, which is
+#  only accurate after [mouse] counts_per_360 has been calibrated.
+#
+#  To see the speed each direction produces at each head angle, run
+#  "Show speed curves.bat", or look at the graphs in the Sensitivity window.
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+#  Where head angles come from
+#    "webcam"    = HeadMouse reads the webcam itself (no OpenTrack needed)
+#    "opentrack" = OpenTrack sends angles over UDP (OpenTrack must be running)
+# -----------------------------------------------------------------------------
+[tracking]
+source = "webcam"
+
+
+# -----------------------------------------------------------------------------
+#  The four directions. Each has its own independent settings.
+#
+#    deadzone          head angle with no movement at all (0 .. deadzone)
+#    min_speed         camera speed just outside the dead zone
+#    max_speed         top camera speed
+#    full_speed_angle  head angle where top speed is reached
+#    curve             shape between min and max speed:
+#                        1.0 = straight line
+#                        2.0 = slow near center, ramps up quickly further out
+#                        3.0 = even more precise near center
+#
+#  Want a direction more responsive? Lower its deadzone and/or full_speed_angle,
+#  or raise min_speed / max_speed. Only that direction changes.
+#
+#  Advanced: instead of the formula you can give an exact table of
+#  [head angle, speed] pairs; a smooth curve is drawn through them and
+#  min_speed, max_speed, full_speed_angle and curve are then ignored, e.g.
+#    points = [[3, 0], [5, 10], [8, 25], [10, 60], [12, 100], [15, 180]]
+# -----------------------------------------------------------------------------
+
+[right]
+deadzone = 3.0
+min_speed = 7.5
+max_speed = 180.0
+full_speed_angle = 15.0
+curve = 2.45
+
+[left]
+deadzone = 3.0
+min_speed = 7.5
+max_speed = 180.0
+full_speed_angle = 15.0
+curve = 2.45
+
+[up]
+deadzone = 2.0
+min_speed = 4.0
+max_speed = 60.0
+full_speed_angle = 10.0
+curve = 1.95
+
+[down]
+deadzone = 2.0
+min_speed = 4.0
+max_speed = 60.0
+full_speed_angle = 10.0
+curve = 1.95
+
+
+# -----------------------------------------------------------------------------
+#  Keys. Use names like "F9", "CAPSLOCK", "PAUSE", "SCROLLLOCK", "NUMPAD0",
+#  "A", "MOUSE4", or "" to switch a key off. Keys are only watched, never
+#  blocked, so the game also receives them - choose keys the game doesn't use.
+#  A USB foot pedal programmed to send the same key works the same way.
+# -----------------------------------------------------------------------------
+[keys]
+pause_hold = "F9"        # HOLD: camera freezes immediately; release to resume
+enable_toggle = "F10"    # press: head control on / off
+recenter = "F8"          # press while looking straight ahead: sets neutral position
+precision_hold = "F7"    # HOLD: slow precision mode (bow aiming)
+calibrate_turn = "F6"    # test turn, while the Game calibration window is open
+
+
+# -----------------------------------------------------------------------------
+#  Mouse output
+# -----------------------------------------------------------------------------
+[mouse]
+# Mouse counts that turn the game camera exactly 360 degrees. Depends on the
+# game's mouse sensitivity setting. Use the "Game calibration" button.
+counts_per_360 = 4000.0
+# Vertical counts per degree relative to horizontal (1.0 = same).
+vertical_scale = 1.0
+# true = looking up moves the camera down (like an aircraft).
+invert_vertical = false
+# Safety limit on mouse counts sent in one tick.
+max_counts_per_tick = 400
+# How long one calibration turn takes, in seconds.
+calibrate_turn_seconds = 3.0
+
+
+# -----------------------------------------------------------------------------
+#  Motion behaviour
+# -----------------------------------------------------------------------------
+[motion]
+# Extra smoothing of head angles, in seconds (0 = off). The tracker's own filter
+# does most of the smoothing; raise this a little if movement looks jittery.
+smoothing_seconds = 0.04
+# Once moving, keep moving (at min_speed) until the head is this many degrees
+# back inside the dead zone. Stops movement flickering on and off at the edge.
+deadzone_hysteresis = 0.3
+# The camera only reverses direction after the head has been back in the
+# dead zone for this long. Prevents an overshoot past center from turning the
+# camera the other way.
+reverse_delay_seconds = 0.15
+# true = after pausing, disabling or losing tracking, movement only resumes
+# once the head has come back to center.
+require_center_to_resume = false
+# Speed multiplier while precision_hold is held (0.2 = 80% slower).
+precision_speed_factor = 0.2
+
+
+# -----------------------------------------------------------------------------
+#  Tracking safety: when to stop movement because tracking can't be trusted
+# -----------------------------------------------------------------------------
+[safety]
+# Stop if the tracker sends nothing for this many seconds (e.g. face not seen).
+no_data_timeout = 0.25
+# Stop if the tracker keeps sending exactly the same numbers for this many
+# seconds (what OpenTrack usually does when it loses your face). 0 = off.
+# If movement stops while you hold your head perfectly still, raise this.
+frozen_data_timeout = 1.0
+# A head angle jump bigger than this between two updates is treated as a
+# tracking glitch: movement stops for jump_holdoff_seconds.
+max_jump_degrees = 25.0
+jump_holdoff_seconds = 0.5
+# Angles beyond these are treated as invalid tracking data.
+max_valid_yaw = 120.0
+max_valid_pitch = 90.0
+
+
+# -----------------------------------------------------------------------------
+#  General
+# -----------------------------------------------------------------------------
+[general]
+# false = start with head control OFF; press enable_toggle to turn it on.
+start_enabled = false
+# Mouse updates per second.
+output_rate_hz = 125.0
+# Text in the game's window title. Used by the two settings below.
+game_window_title = "Enshrouded"
+# true = head control switches ON when the game window becomes active and OFF
+# when you switch away from it. enable_toggle still works at any time.
+auto_enable_in_game = true
+# true = never move the mouse unless the game window is active (the desktop
+# test then does nothing).
+only_move_in_game_window = false
+# Keep the HeadMouse window on top of other windows.
+always_on_top = false
+# Window colours: "system" (follow Windows), "light" or "dark".
+theme = "system"
+# Look for a newer HeadMouse when it starts (installed app only).
+check_for_updates = true
+# Show the live status line (console mode).
+show_status = true
+# Set by the setup wizard. false = the wizard opens when HeadMouse starts.
+setup_done = false
+
+
+# -----------------------------------------------------------------------------
+#  Sound cues (so you know what HeadMouse is doing without looking)
+# -----------------------------------------------------------------------------
+[sounds]
+enabled = true
+# 0.0 (silent) to 1.0 (loudest)
+volume = 0.5
+# Rising tone = head control on, falling tone = off.
+on_enable_disable = true
+# Low double tone = tracking lost (movement stopped), short high tone = back.
+on_tracking_lost = true
+# Click when the pause key is pressed (off by default - the pedal is used a lot).
+on_pause = false
+
+
+# -----------------------------------------------------------------------------
+#  Built-in webcam tracking (used when [tracking] source = "webcam")
+# -----------------------------------------------------------------------------
+[webcam]
+# 0 = first camera. Try 1, 2 ... if the wrong camera is used.
+camera_index = 0
+frame_width = 640
+frame_height = 480
+fps = 30
+# Smoothing: lower min_cutoff = steadier but slower to react; higher beta =
+# less lag during fast head turns.
+smoothing_min_cutoff = 1.0
+smoothing_beta = 0.05
+# Head angles when looking straight at the screen. Set by the setup wizard
+# and by the re-center key.
+neutral_yaw = 0.0
+neutral_pitch = 0.0
+# Set automatically by the setup wizard.
+yaw_right_is_positive = true
+pitch_up_is_positive = true
+# Leave empty to use face_landmarker.task next to HeadMouse (downloaded
+# automatically the first time if missing).
+model_path = ""
+
+
+# -----------------------------------------------------------------------------
+#  OpenTrack (used when [tracking] source = "opentrack"). Must match OpenTrack's
+#  "UDP over network" output - the "Set up OpenTrack profile" button does that.
+# -----------------------------------------------------------------------------
+[opentrack]
+listen_address = "127.0.0.1"
+port = 4242
+# Set to false if the monitor shows LEFT when you turn right.
+yaw_right_is_positive = true
+# Set to false if the monitor shows DOWN when you look up.
+pitch_up_is_positive = true
+# Start OpenTrack automatically when HeadMouse starts (if it isn't running).
+launch_opentrack = true
+# Full path to opentrack.exe. Empty = look in the usual install folders.
+opentrack_exe = ""
