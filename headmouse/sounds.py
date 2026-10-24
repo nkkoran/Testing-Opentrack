@@ -25,6 +25,8 @@ CUES = {
     "target": [(1175, 0.05)],
     "precision_on": [(523, 0.05), (392, 0.08)],     # going down: slower aim
     "precision_off": [(392, 0.05), (523, 0.08)],
+    "situation_on": [(740, 0.04)],                    # a different feel for aiming, building or a menu
+    "situation_off": [(554, 0.04)],
 }
 
 

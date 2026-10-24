@@ -99,13 +99,15 @@ stopped), short high tone = tracking back.
 | Head control switch | Same as F10 |
 | Head view | The dot is your head. Green box = dead zone, dashed box = full speed; the arrows light up in the direction the camera is turning |
 | Re-center | Look straight at the screen and press it (or F8) |
+| Quick fixes | Say what feels wrong ("small aiming is jumpy", "keeps moving after I stop"...) and HeadMouse adjusts it (below) |
 | Settings | Everything else (below) |
 | Camera / Stay on top | Small switches at the bottom: a floating camera preview, and keeping HeadMouse above the game |
 
-**Settings** has four tabs. Changes are tried out immediately; **Save** keeps them and **Undo
+**Settings** has five tabs. Changes are tried out immediately; **Save** keeps them and **Undo
 changes** goes back.
 - **Feel:** choose **Left & right** or **Up & down**, how the head moves the camera there, and
   the settings for that, while watching the graph.
+- **Situations:** a different feel while aiming, building or in menus (below).
 - **Tracking:** webcam or OpenTrack, camera choice, the setup wizard, and the OpenTrack profile
   helper.
 - **Game:** calibration for the game, and auto-on in the game window. Head control is paused while
@@ -130,6 +132,15 @@ exactly like F9.
 
 ## 6. Adjusting the feel
 
+### Quick fixes: just say what feels wrong
+
+**Quick fixes** (main window, or **Settings → Feel**) lists problems in plain words for left &
+right or up & down: big turns too slow or too fast, small aiming jumpy or sticky, shaky when
+holding still, laggy, keeps moving after stopping, turning starts during small aiming, and (up &
+down) glancing at the keyboard moves the camera. Tap one and HeadMouse makes a small change for
+that pair, in the mode it uses, and shows exactly what changed. It is used and saved straight
+away: try it in the game, tap again if it needs more, or **Undo last change**.
+
 ### Let HeadMouse find the settings: the practice game
 
 **Settings → Feel → Find my best settings (practice game).** Blue targets appear; steer the
@@ -151,8 +162,10 @@ Run it again any time, for example after getting used to the new settings.
 
 ### Presets
 
-A preset is a named feel: the four direction settings plus precision speed. Keys, camera, game
-and glance settings are never changed by a preset.
+A preset is a named feel: the four direction settings, precision speed, and how the head moves
+the camera (the mode and the mouse-like settings). Keys, camera, game, glance and the "for all
+directions" helpers are never changed by a preset. The built-in presets, and presets saved by
+versions before 1.7, keep your current mouse-like settings.
 
 - **Switch:** the **Feel** menu on the main window applies a preset straight away. If your current
   feel isn't saved yet, it offers to save it first.
@@ -239,6 +252,27 @@ smaller.
 Everything is stored in `headmouse_settings.toml` (with explanations). It can also be edited in
 Notepad, and changes apply within a second. Settings saved by earlier versions keep working
 unchanged.
+
+### Situations: a different feel for aiming, building and menus
+
+Different parts of the game want different movement: quick turning while exploring, slow and
+exact while aiming a bow or placing a building piece, and a pointer in menus. **Settings →
+Situations** has one card for each:
+
+- **Feel:** the preset to use. **Make suggested** creates a starting preset from your current
+  settings (mouse-like, lower sensitivity, slow-movement precision; a bigger mouse-like area for
+  menus) that you can then fine-tune on the Feel tab.
+- **Key:** the key or mouse button **the game** uses for it. HeadMouse only watches it. **Hold**
+  uses the feel while the key is held; **Tap on/off** switches it on and off. In Enshrouded you
+  aim a bow by holding the right mouse button (or Q), so aiming defaults to RIGHTMOUSE + Hold.
+  For building, choose a key the game doesn't use and tap it when you start and stop.
+- **Menus:** also **when the game shows a mouse pointer**: HeadMouse switches whenever Windows
+  shows a pointer in the game window. Whether Enshrouded uses the Windows pointer isn't known for
+  sure; the tab shows "mouse pointer shown/hidden" live so you can check in a menu. If it doesn't
+  change, use a key instead.
+- If two are active, menus win over aiming, aiming over building. A short blip plays on each change
+  (can be switched off), and the main window shows which feel is in use. Turning head control off
+  and on goes back to the normal feel.
 
 ### Glancing away (e.g. at the keyboard): optional
 
@@ -337,6 +371,8 @@ headmouse/glance.py           glance guard: pauses while looking away (gaze from
 headmouse/engine.py           the loop on a background thread; keys, sounds, auto-on, test turn
 headmouse/calibration.py      setup-wizard maths
 headmouse/tuning.py           practice game: measures each direction and proposes better settings
+headmouse/quickfix.py         Quick fixes: plain-language problems -> small, bounded setting changes
+headmouse/situations.py       Situations: descriptions and suggested feels (aiming, building, menus)
 headmouse/gui.py              the window (CustomTkinter): main screen, Settings, setup wizard
 headmouse/opentrack_setup.py  OpenTrack profile copy/patch and launching
 headmouse/winput.py           Windows SendInput / GetAsyncKeyState

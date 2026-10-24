@@ -175,6 +175,30 @@ wobble_y = 0.25
 
 
 # -----------------------------------------------------------------------------
+#  Situations: a different feel (one of your presets) for parts of the game,
+#  e.g. slow mouse-like aiming while you aim a bow. Each is off while its
+#  preset is "". The key is the one the GAME uses for that (HeadMouse only
+#  watches it): "RIGHTMOUSE", "TAB", "B", ... With *_toggle = false the feel
+#  is used while the key is held; true = tap on, tap off. If more than one is
+#  active, menus win over aiming, and aiming over building.
+# -----------------------------------------------------------------------------
+[situations]
+aim_preset = ""
+aim_key = ""
+aim_toggle = false
+build_preset = ""
+build_key = ""
+build_toggle = true
+menu_preset = ""
+menu_key = ""
+menu_toggle = true
+# Also use the menu feel whenever the game shows a mouse pointer.
+menu_pointer = false
+# A short blip when the feel changes.
+sound = true
+
+
+# -----------------------------------------------------------------------------
 #  Keys. Use names like "F9", "CAPSLOCK", "PAUSE", "SCROLLLOCK", "NUMPAD0",
 #  "A", "MOUSE4", or "" to switch a key off. Keys are only watched, never
 #  blocked, so the game also receives them - choose keys the game doesn't use.

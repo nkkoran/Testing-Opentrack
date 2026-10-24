@@ -203,6 +203,17 @@ class MotionController:
         result.waiting_for_center = self._need_center
         return result
 
+    def take_over(self, other):
+        """Continue from another controller (a different feel for a situation in the game)
+        without a jump: same head position, smoothing, learned center and glance state."""
+        self._smoothed, self._speed_from, self.head_speed = other._smoothed, other._speed_from, other.head_speed
+        self.drift = list(other.drift)
+        self.glance = other.glance
+        self._need_center = other._need_center
+        self.reset_follow()
+        self.yaw_axis.reset()
+        self.pitch_axis.reset()
+
     def recentered(self):
         """The neutral position changed: start over from wherever the head is now."""
         self.drift = [0.0, 0.0]

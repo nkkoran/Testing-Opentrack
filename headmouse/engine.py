@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import config
+from .config import SITUATION_NAMES, SITUATIONS
+from .keys import key_code
 from .controller import MotionController, StepResult, orient
 from .safety import TrackingMonitor, TrackingStatus
 from .sounds import SoundPlayer
@@ -31,7 +33,7 @@ log = logging.getLogger("headmouse")
 
 @dataclass
 class Event:
-    kind: str       # enabled, disabled, pause, tracking_lost, tracking_ok, recentered, info, warning
+    kind: str       # enabled, disabled, pause, tracking_lost, tracking_ok, recentered, situation, info, warning
     text: str = ""
     data: object = None
 
@@ -76,6 +78,8 @@ class HeadMouse:
         self._focus_since = 0.0
         self.paused = False
         self.precision_on = False   # precision key in toggle mode
+        self.situation = None       # "menu", "aim", "build" or None (normal feel)
+        self._toggled = {}          # situations switched on with a tap
         self.settings = None
         self._events = []
         self._last_tick = None
@@ -83,13 +87,21 @@ class HeadMouse:
         self._reported_failures = 0
         self.apply_settings(settings)
 
-    def apply_settings(self, settings):
+    def apply_settings(self, settings, feels=None):
+        """Use new settings. feels: {situation: Settings} - the feel (preset) for each situation in use."""
         previous = self.settings
         self.settings = settings
         old = getattr(self, "controller", None)
-        self.controller = MotionController(settings)
+        self.controllers = {None: MotionController(settings)}
+        for name, feel in (feels or {}).items():
+            self.controllers[name] = MotionController(feel)
+        if self.situation not in self.controllers:
+            self.situation = None
+        self.controller = self.controllers[self.situation]
         if old is not None and settings.assist.auto_center:
             self.controller.drift = list(old.drift)  # keep what auto-center has learned
+        self._situation_keys = {name: key_code(getattr(settings.situations, f"{name}_key"))
+                                for name in SITUATIONS}
         self.monitor = TrackingMonitor(settings.safety)
         self.vk = {name: settings.key(name) for name in KEY_NAMES}
         if settings.tracking.source == "webcam":
@@ -101,6 +113,7 @@ class HeadMouse:
         if value != self.enabled:
             self.enabled = value
             self.precision_on = False   # always start without precision aim
+            self._toggled = {}          # ...and in the normal feel
             self._events.append(Event("enabled", "Head control ON") if value
                                 else Event("disabled", "Head control OFF"))
 
@@ -112,6 +125,29 @@ class HeadMouse:
         self.controller.recentered()  # the head didn't move, so the camera mustn't either
         self._events.append(Event("recentered", f"Re-centered (yaw {self.offset[0]:+.1f}, "
                                                 f"pitch {self.offset[1]:+.1f})", self.offset))
+
+    def _update_situation(self, focused):
+        """Pick the feel for what the player is doing (aiming, building, a menu) and switch to it."""
+        s = self.settings.situations
+        wanted = None
+        for name in SITUATIONS:
+            vk = self._situation_keys[name]
+            if getattr(s, f"{name}_toggle"):
+                if self.keys.pressed(vk):
+                    self._toggled[name] = not self._toggled.get(name, False)
+                on = self._toggled.get(name, False)
+            else:
+                on = self.keys.held(vk)
+            if name == "menu" and s.menu_pointer and focused is not False:
+                on = on or self.backend.pointer_visible()
+            if on and wanted is None and name in self.controllers:
+                wanted = name
+        if wanted != self.situation:
+            new = self.controllers[wanted]
+            new.take_over(self.controller)
+            self.controller, self.situation = new, wanted
+            self._events.append(Event("situation", "Feel: " + (SITUATION_NAMES[wanted] if wanted else "normal"),
+                                      wanted))
 
     def _game_focused(self):
         wanted = self.settings.general.game_window_title.strip().lower()
@@ -153,6 +189,8 @@ class HeadMouse:
             precision = self.precision_on
         else:
             precision = self.keys.held(self.vk["precision_hold"])
+
+        self._update_situation(focused)
 
         sample = self.source.latest()
         self.tracking, raw = self.monitor.check(sample, now)
@@ -280,6 +318,7 @@ class Snapshot:
     eye_pitch: float = None
     rate: float = 0.0
     practice_camera: tuple = (0.0, 0.0)
+    situation: str = None
     dry_run: bool = False
     settings: object = None
 
@@ -342,6 +381,8 @@ class Engine:
         self.source = self._start_source(settings)
         self.app = HeadMouse(settings, self.source, self._backend,
                              send=not self.dry_run and windows)
+        self._preset_mtime = self._read_preset_mtime()
+        self.app.apply_settings(settings, self._feels(settings))
         self._maybe_launch_opentrack(settings)
         from . import __version__
         log.info("HeadMouse %s started (tracker %s, settings %s)", __version__, settings.tracking.source, self.path)
@@ -371,6 +412,13 @@ class Engine:
 
     def recenter(self):
         self.call(self.app.recenter)
+
+    def pointer_visible(self):
+        """Whether Windows shows a mouse pointer right now (for the Situations tab)."""
+        try:
+            return bool(self._backend.pointer_visible())
+        except (AttributeError, OSError):
+            return False
 
     def set_practice(self, on):
         """Practice game: head control turns a virtual camera instead of the mouse."""
@@ -471,10 +519,34 @@ class Engine:
                 self._maybe_launch_opentrack(new)
         elif hasattr(self.source, "update_settings"):
             self.source.update_settings(new.webcam)
-        self.app.apply_settings(new)
+        self.app.apply_settings(new, self._feels(new))
         self._sounds.update(new.sounds)
 
+    def _feels(self, settings):
+        """{situation: Settings} for each situation with a preset chosen."""
+        feels = {}
+        for name in SITUATIONS:
+            preset = getattr(settings.situations, f"{name}_preset")
+            if not preset:
+                continue
+            try:
+                feels[name] = config.load_preset(self.path, preset, settings)
+            except config.SettingsError as e:
+                self._message("warning", f"{SITUATION_NAMES[name]} feel not used: {e}")
+        return feels
+
+    def _read_preset_mtime(self):
+        folder = config.preset_folder(self.path)
+        try:
+            return max([folder.stat().st_mtime] + [p.stat().st_mtime for p in folder.glob("*.toml")])
+        except OSError:
+            return None
+
     def _check_file(self):
+        presets = self._read_preset_mtime()
+        if presets != self._preset_mtime:   # a preset used for a situation may have changed
+            self._preset_mtime = presets
+            self.app.apply_settings(self.settings, self._feels(self.settings))
         mtime = self._read_mtime()
         if mtime == self._mtime:
             return
@@ -521,6 +593,8 @@ class Engine:
         self._message(event.kind, event.text)
         if event.kind in ("enabled", "disabled", "pause", "precision_on", "precision_off"):
             self._sounds.play(event.kind)
+        elif event.kind == "situation" and self.settings.situations.sound:
+            self._sounds.play("situation_on" if event.data else "situation_off")
         elif event.kind == "tracking_lost":
             # Movement stops at once, but only beep if it lasts (games can briefly starve the camera).
             self._lost_since = self._clock()
@@ -550,7 +624,7 @@ class Engine:
             packets=getattr(src, "packets", 0), in_game=app.in_game,
             test_turn_active=self._turn_remaining > 0, dry_run=self.dry_run,
             glancing=r.glancing, gaze=r.gaze, eye_pitch=app.eye_pitch, rate=self.rate,
-            practice_camera=tuple(app.practice_camera),
+            practice_camera=tuple(app.practice_camera), situation=app.situation,
             settings=self.settings)
         with self._lock:
             self._snapshot = snap

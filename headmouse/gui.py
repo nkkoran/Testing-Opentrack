@@ -16,7 +16,7 @@ from tkinter import messagebox
 
 import customtkinter as ctk
 
-from . import calibration, config, opentrack_setup, quickfix, tuning, updates
+from . import calibration, config, opentrack_setup, quickfix, situations, tuning, updates
 from .curves import DirectionCurve
 from .engine import Engine, uses_eyes
 from .keys import name_from_tk_keysym
@@ -189,11 +189,12 @@ def describe(snap):
         return "Looking away", "The camera waits until you look back at the screen", "CENTER"
     if state.startswith("CENTER"):
         return "Center your head", "Movement resumes once your head is back in the middle", "CENTER"
+    feel = f"{config.SITUATION_NAMES[snap.situation]} feel  ·  " if snap.situation else ""
     if "precision" in state:
         if s.general.precision_toggle:
-            return "Precision aim", f"Slow mode - press {k.precision_hold} again to end it", "ACTIVE"
-        return "Precision aim", f"Slow mode while {k.precision_hold} is held", "ACTIVE"
-    return "On", f"Hold {k.pause_hold} to freeze the camera", "ACTIVE"
+            return "Precision aim", f"{feel}Slow mode - press {k.precision_hold} again to end it", "ACTIVE"
+        return "Precision aim", f"{feel}Slow mode while {k.precision_hold} is held", "ACTIVE"
+    return "On", f"{feel}Hold {k.pause_hold} to freeze the camera", "ACTIVE"
 
 
 CUSTOM_PRESET = "Custom (not saved as a preset)"
@@ -702,10 +703,11 @@ class SettingsWindow(Child):
                                    segmented_button_selected_color=PILL, segmented_button_selected_hover_color=PILL,
                                    text_color=TEXT)
         self.tabs.pack(fill="both", expand=True, padx=18, pady=(12, 0))
-        for name in ("Feel", "Tracking", "Game", "Keys & sound"):
+        for name in ("Feel", "Situations", "Tracking", "Game", "Keys & sound"):
             self.tabs.add(name)
-        self.tabs._segmented_button.configure(font=font(14, "bold"), height=36)
+        self.tabs._segmented_button.configure(font=font(13, "bold"), height=36)
         self._feel_tab(self.tabs.tab("Feel"))
+        self._situations_tab(self.tabs.tab("Situations"))
         self._tracking_tab(self.tabs.tab("Tracking"))
         self._game_tab(self.tabs.tab("Game"))
         self._keys_tab(self.tabs.tab("Keys & sound"))
@@ -1265,6 +1267,140 @@ class SettingsWindow(Child):
             x, y, r = px(sign * angle), py(speed(curve, d, angle)), 7 * k
             c.create_oval(x - r, y - r, x + r, y + r, fill=pick(DANGER), outline=bg, width=2)
 
+    # --- Situations ----------------------------------------------------------
+
+    OFF = "Off (normal feel)"
+
+    def _situations_tab(self, tab):
+        scroll = scroll_frame(tab)
+        scroll.pack(fill="both", expand=True)
+        ctk.CTkLabel(scroll, text="A different feel for parts of the game", font=font(16, "bold"), text_color=TEXT,
+                     anchor="w").pack(fill="x")
+        ctk.CTkLabel(scroll, text="HeadMouse can switch to another preset while you aim, build or use a menu, "
+                                  "and back again afterwards - for example slow, exact aiming but quick turning "
+                                  "while exploring. Press \"Make suggested\" to start from a ready-made feel, "
+                                  "then fine-tune it like any preset (Feel tab).",
+                     font=font(12), text_color=MUTED, wraplength=470, justify="left", anchor="w").pack(fill="x")
+        self.now_label = ctk.CTkLabel(scroll, text="", font=font(13, "bold"), text_color=TEXT, anchor="w")
+        self.now_label.pack(fill="x", pady=(8, 0))
+        self.situation_widgets = {}
+        for name in config.SITUATIONS[1:] + config.SITUATIONS[:1]:   # aiming, building, then menus
+            self._situation_card(scroll, name)
+        self.situation_sound = switch(scroll, "Short blip when the feel changes",
+                                      lambda: self._set("situations", sound=bool(self.situation_sound.get())),
+                                      font=font(13), text_color=TEXT)
+        if self.work.situations.sound:
+            self.situation_sound.select()
+        self.situation_sound.pack(anchor="w", pady=(14, 0))
+        self._capturing_situation = None
+
+    def _situation_card(self, parent, name):
+        s = self.work.situations
+        title, text = situations.DESCRIPTIONS[name]
+        box = ctk.CTkFrame(parent, fg_color=SUBTLE, corner_radius=14)
+        box.pack(fill="x", pady=(12, 0))
+        ctk.CTkLabel(box, text=title, font=font(15, "bold"), text_color=TEXT, anchor="w").pack(
+            fill="x", padx=14, pady=(12, 0))
+        ctk.CTkLabel(box, text=text, font=font(11), text_color=MUTED, wraplength=440, justify="left",
+                     anchor="w").pack(fill="x", padx=14)
+        row = ctk.CTkFrame(box, fg_color="transparent")
+        row.pack(fill="x", padx=14, pady=(8, 0))
+        ctk.CTkLabel(row, text="Feel", font=font(13, "bold"), text_color=TEXT, width=50, anchor="w").pack(side="left")
+        small_button(row, "Make suggested", lambda: self._make_suggested(name), width=130).pack(side="right")
+        menu = dropdown(row, [self.OFF], command=lambda v: self._situation_preset(name, v), height=32)
+        menu.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        row = ctk.CTkFrame(box, fg_color="transparent")
+        row.pack(fill="x", padx=14, pady=(8, 0))
+        ctk.CTkLabel(row, text="Key", font=font(13, "bold"), text_color=TEXT, width=50, anchor="w").pack(side="left")
+        key = ctk.CTkButton(row, text=getattr(s, f"{name}_key") or "none", width=130, height=32, corner_radius=8,
+                            font=font(13, "bold"), command=lambda: self._capture_situation(name), **self.KEYCAP)
+        key.pack(side="left")
+        how = segmented(row, ["Hold", "Tap on/off"], lambda v: self._set(
+            "situations", **{f"{name}_toggle": v != "Hold"}), height=32)
+        how.set("Tap on/off" if getattr(s, f"{name}_toggle") else "Hold")
+        how.pack(side="left", fill="x", expand=True, padx=(8, 0))
+        widgets = {"menu": menu, "key": key, "how": how}
+        if name == "menu":
+            pointer = switch(box, "Also when the game shows a mouse pointer", lambda: self._set(
+                "situations", menu_pointer=bool(pointer.get())), font=font(13), text_color=TEXT)
+            if s.menu_pointer:
+                pointer.select()
+            pointer.pack(anchor="w", padx=14, pady=(10, 0))
+            widgets["pointer"] = pointer
+        ctk.CTkFrame(box, height=10, fg_color="transparent").pack()
+        self.situation_widgets[name] = widgets
+        self._show_situation_presets(name)
+
+    def _show_situation_presets(self, name):
+        menu = self.situation_widgets[name]["menu"]
+        chosen = getattr(self.work.situations, f"{name}_preset")
+        names = [self.OFF] + config.list_presets(self.engine.path)
+        if chosen and chosen not in names:
+            names.append(chosen)
+        menu.configure(values=names)
+        menu.set(chosen or self.OFF)
+
+    def _situation_preset(self, name, value):
+        self._set("situations", **{f"{name}_preset": "" if value == self.OFF else value})
+        if value != self.OFF and not getattr(self.work.situations, f"{name}_key") \
+                and not (name == "menu" and self.work.situations.menu_pointer):
+            self.saved_label.configure(text=f"Now choose the key for {config.SITUATION_NAMES[name].lower()}")
+
+    def _make_suggested(self, name):
+        preset = situations.suggested_name(name)
+        try:
+            config.save_preset(self.engine.path, preset, situations.suggested_feel(self.work, name))
+        except config.SettingsError as e:
+            messagebox.showerror("HeadMouse", str(e), parent=self.top)
+            return
+        key, toggle = situations.SUGGESTED_KEYS[name]
+        values = {f"{name}_preset": preset}
+        if key and not getattr(self.work.situations, f"{name}_key"):
+            values.update({f"{name}_key": key, f"{name}_toggle": toggle})
+            self.situation_widgets[name]["key"].configure(text=key)
+            self.situation_widgets[name]["how"].set("Tap on/off" if toggle else "Hold")
+        self._set("situations", **values)
+        for other in config.SITUATIONS:
+            self._show_situation_presets(other)
+        self._show_presets()
+        self.saved_label.configure(text=f'Made the preset "{preset}" - change it on the Feel tab, press Save to use it')
+
+    def _capture_situation(self, name):
+        self._capturing_situation = name
+        self.situation_widgets[name]["key"].configure(text="Press a key...", **self.KEYCAP_ACTIVE)
+        self.top.bind("<KeyPress>", self._situation_key)
+        self.top.bind("<ButtonPress>", self._situation_key)
+        self.top.focus_force()
+
+    def _situation_key(self, event):
+        name = self._capturing_situation
+        if name is None:
+            return
+        mouse = {2: "MIDDLEMOUSE", 3: "RIGHTMOUSE", 4: "MOUSE4", 5: "MOUSE5"}
+        if getattr(event, "num", "??") in mouse:
+            key = mouse[event.num]
+        elif getattr(event, "num", "??") == 1:
+            return   # the click that started choosing
+        elif event.keysym == "Escape":
+            key = getattr(self.work.situations, f"{name}_key")
+        elif event.keysym in ("Delete", "BackSpace"):
+            key = ""
+        else:
+            key = name_from_tk_keysym(event.keysym)
+            if key is None:
+                self.saved_label.configure(text=f"'{event.keysym}' can't be used - try another key")
+                return
+            own = next((f for f in dataclasses.fields(config.KeySettings) if getattr(self.work.keys, f.name) == key),
+                       None)
+            if own:
+                self.saved_label.configure(text=f"{key} is one of HeadMouse's own keys - choose the game's key")
+                return
+        self._set("situations", **{f"{name}_key": key})
+        self.situation_widgets[name]["key"].configure(text=key or "none", **self.KEYCAP)
+        self._capturing_situation = None
+        self.top.unbind("<KeyPress>")
+        self.top.unbind("<ButtonPress>")
+
     # --- Tracking ------------------------------------------------------------
 
     def _tracking_tab(self, tab):
@@ -1549,6 +1685,12 @@ class SettingsWindow(Child):
         snap = self.engine.snapshot()
         if self.tabs.get() == "Feel":
             self._plot(snap)
+        if self.tabs.get() == "Situations":
+            now = config.SITUATION_NAMES[snap.situation] if snap.situation else "normal feel"
+            pointer = ""
+            if self.work.situations.menu_pointer and hasattr(self.engine, "pointer_visible"):
+                pointer = "  ·  mouse pointer " + ("shown" if self.engine.pointer_visible() else "hidden")
+            self.now_label.configure(text=f"Using now: {now}{pointer}")
         ok = snap.tracking == TrackingStatus.OK and not snap.source_error
         self.track_status.configure(text="●  Tracking OK" if ok else f"●  {snap.source_status}",
                                     text_color=STATE_COLORS["ACTIVE"] if ok else DANGER)

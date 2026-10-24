@@ -177,6 +177,26 @@ class AssistSettings:
     wobble_y: float = 0.25
 
 
+SITUATIONS = ("menu", "aim", "build")   # checked in this order: the first one active wins
+SITUATION_NAMES = {"menu": "Menus", "aim": "Aiming", "build": "Building"}
+
+
+@dataclass
+class SituationSettings:
+    """A different feel (a preset) for parts of the game. All off unless a preset is chosen."""
+    aim_preset: str = ""        # preset used while aiming ("" = off)
+    aim_key: str = ""           # the key or mouse button the game uses to aim
+    aim_toggle: bool = False    # False: while the key is held; True: tap on, tap off
+    build_preset: str = ""
+    build_key: str = ""
+    build_toggle: bool = True
+    menu_preset: str = ""
+    menu_key: str = ""
+    menu_toggle: bool = True
+    menu_pointer: bool = False  # also whenever the game shows a mouse pointer
+    sound: bool = True          # a short blip when the feel changes
+
+
 @dataclass
 class Settings:
     tracking: TrackingSettings = field(default_factory=TrackingSettings)
@@ -194,6 +214,7 @@ class Settings:
     down: DirectionSettings = field(default_factory=_vertical)
     glance: GlanceSettings = field(default_factory=GlanceSettings)
     assist: AssistSettings = field(default_factory=AssistSettings)
+    situations: SituationSettings = field(default_factory=SituationSettings)
 
     def source_settings(self):
         """The [webcam] or [opentrack] section for the tracker in use."""
@@ -375,6 +396,11 @@ def validate(s):
            "[assist] fast_speed_x and fast_speed_y must be 2-90 degrees/second")
     _check(0.05 <= a.wobble_x <= 1.5 and 0.05 <= a.wobble_y <= 1.5,
            "[assist] wobble_x and wobble_y must be 0.05-1.5 degrees")
+    for name in SITUATIONS:
+        try:
+            key_code(getattr(s.situations, f"{name}_key"))
+        except ValueError as e:
+            raise SettingsError(f"[situations] {name}_key: {e}") from None
     _check(0 <= a.hybrid_blend <= 10 and 0 <= a.hybrid_blend_y <= 10,
            "[assist] hybrid_blend and hybrid_blend_y must be 0-10 degrees")
     _check(0 <= a.mouse_delay_x <= 2 and 0 <= a.mouse_delay_y <= 2,

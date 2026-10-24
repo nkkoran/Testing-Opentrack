@@ -46,6 +46,14 @@ class INPUT(ctypes.Structure):
     _fields_ = [("type", ctypes.c_uint32), ("u", _INPUTUNION)]
 
 
+class CURSORINFO(ctypes.Structure):
+    _fields_ = [("cbSize", ctypes.c_uint32), ("flags", ctypes.c_uint32), ("hCursor", ctypes.c_void_p),
+                ("x", ctypes.c_int32), ("y", ctypes.c_int32)]
+
+
+CURSOR_SHOWING = 0x00000001
+
+
 class WindowsInput:
     def __init__(self):
         from ctypes import wintypes
@@ -59,6 +67,9 @@ class WindowsInput:
         self._user32.GetWindowTextW.argtypes = (wintypes.HWND, wintypes.LPWSTR, ctypes.c_int)
         self._user32.GetWindowThreadProcessId.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.DWORD))
         self._user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+        self._user32.GetCursorInfo.argtypes = (ctypes.POINTER(CURSORINFO),)
+        self._user32.GetCursorInfo.restype = wintypes.BOOL
+        self._cursor = CURSORINFO(cbSize=ctypes.sizeof(CURSORINFO))
         self._pid = os.getpid()
         self._input = INPUT(type=INPUT_MOUSE)
         self.failed_sends = 0
@@ -77,6 +88,14 @@ class WindowsInput:
 
     def is_key_down(self, vk):
         return vk is not None and bool(self._user32.GetAsyncKeyState(vk) & 0x8000)
+
+    def pointer_visible(self):
+        """True while Windows shows a mouse pointer (games hide it while the mouse turns the camera).
+        A game can also hide it with SetCursor(NULL), which leaves the SHOWING flag set - hence hCursor."""
+        self._cursor.cbSize = ctypes.sizeof(CURSORINFO)
+        if not self._user32.GetCursorInfo(ctypes.byref(self._cursor)):
+            return False
+        return bool(self._cursor.flags & CURSOR_SHOWING) and bool(self._cursor.hCursor)
 
     def foreground_window_title(self):
         hwnd = self._user32.GetForegroundWindow()
@@ -104,6 +123,7 @@ class NullInput:
         self.sent = []
         self.keys_down = set()
         self.window_title = ""
+        self.pointer = False
         self.failed_sends = 0
 
     def send_relative(self, dx, dy):
@@ -111,6 +131,9 @@ class NullInput:
 
     def is_key_down(self, vk):
         return vk is not None and vk in self.keys_down
+
+    def pointer_visible(self):
+        return self.pointer
 
     def foreground_window_title(self):
         return self.window_title
@@ -125,6 +148,9 @@ class KeyReader(NullInput):
 
     def is_key_down(self, vk):
         return self._win.is_key_down(vk) if self._win else super().is_key_down(vk)
+
+    def pointer_visible(self):
+        return self._win.pointer_visible() if self._win else super().pointer_visible()
 
     def foreground_window_title(self):
         return self._win.foreground_window_title() if self._win else super().foreground_window_title()

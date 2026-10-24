@@ -36,6 +36,11 @@ class WindowsInputTests(unittest.TestCase):
         self.assertFalse(w.is_key_down(None))
         self.assertIsInstance(w.foreground_window_title(), str)
 
+    def test_pointer_visible(self):
+        from headmouse.winput import CURSORINFO, WindowsInput
+        self.assertEqual(ctypes.sizeof(CURSORINFO), 24 if ctypes.sizeof(ctypes.c_void_p) == 8 else 20)
+        self.assertIsInstance(WindowsInput().pointer_visible(), bool)
+
     def test_zero_movement_send(self):
         from headmouse.winput import WindowsInput
         w = WindowsInput()
