@@ -218,6 +218,16 @@ class EngineTests(unittest.TestCase):
         self.engine.stop()
         self.dir.cleanup()
 
+    def test_an_error_does_not_stop_the_engine_or_leave_buttons_held(self):
+        e = self.start()
+        e.call(lambda: e.app.set_buttons({"left"}))
+        self.assertTrue(wait_for(lambda: ("left", True) in self.backend.buttons))
+        e.call(lambda: 1 / 0)                                   # something goes wrong
+        self.assertTrue(wait_for(lambda: ("left", False) in self.backend.buttons))
+        sent = len(self.backend.sent)
+        self.assertTrue(wait_for(lambda: len(self.backend.sent) > sent + 5))   # still running
+        self.assertTrue(any("went wrong" in text for _, text in e.drain_messages()))
+
     def test_moves_and_toggles(self):
         e = self.start()
         self.assertTrue(wait_for(lambda: sum(dx for dx, _ in self.backend.sent) > 20))

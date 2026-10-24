@@ -735,32 +735,48 @@ class Engine:
         next_check = 0.0
         last = self._clock()
         next_tick = self._clock()
+        reported = set()
         with high_resolution_timer():
-            while self._running:
-                now = self._clock()
-                dt = min(now - last, 0.05)
-                last = now
-                while True:
+            try:
+                while self._running:
+                    now = self._clock()
+                    dt = min(now - last, 0.05)
+                    last = now
                     try:
-                        self._commands.get_nowait()()
-                    except queue.Empty:
-                        break
-                if now >= next_check:
-                    next_check = now + 1.0
-                    self._check_file()
-                    self._measure_rate(now)
-                self._beep_if_still_lost(now)
-                for event in self.app.tick(now):
-                    self._handle(event)
-                if self.calibration_mode and self.app.keys.pressed(self.app.vk["calibrate_turn"]):
-                    self._begin_turn()
-                if self._turn_remaining > 0:
-                    self._turn_tick(dt)
-                self._update_snapshot()
-                period = 1.0 / self.settings.general.output_rate_hz
-                next_tick += period
-                delay = next_tick - self._clock()
-                if delay > 0:
-                    time.sleep(delay)
-                else:
-                    next_tick = self._clock()
+                        next_check = self._step(now, dt, next_check)
+                    except Exception as e:   # keep running; never leave a mouse button held
+                        self.app.set_buttons(set())
+                        if repr(e) not in reported:
+                            reported.add(repr(e))
+                            log.exception("engine step failed")
+                            self._message("warning", f"Something went wrong ({e}) - HeadMouse carries on")
+                    period = 1.0 / self.settings.general.output_rate_hz
+                    next_tick += period
+                    delay = next_tick - self._clock()
+                    if delay > 0:
+                        time.sleep(delay)
+                    else:
+                        next_tick = self._clock()
+            finally:
+                self.app.set_buttons(set())
+
+    def _step(self, now, dt, next_check):
+        """One pass of the loop: commands from the window, file checks, the tick, the test turn."""
+        while True:
+            try:
+                self._commands.get_nowait()()
+            except queue.Empty:
+                break
+        if now >= next_check:
+            next_check = now + 1.0
+            self._check_file()
+            self._measure_rate(now)
+        self._beep_if_still_lost(now)
+        for event in self.app.tick(now):
+            self._handle(event)
+        if self.calibration_mode and self.app.keys.pressed(self.app.vk["calibrate_turn"]):
+            self._begin_turn()
+        if self._turn_remaining > 0:
+            self._turn_tick(dt)
+        self._update_snapshot()
+        return next_check
