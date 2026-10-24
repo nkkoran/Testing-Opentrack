@@ -296,7 +296,10 @@ the keyboard:
 - **Face gestures** (built-in webcam): **open mouth**, **raise eyebrows**, **smile**, **pucker
   lips**, in the style of Google's Project Gameface. Each has a live bar showing how strongly
   the webcam sees it, and a **Counts from** slider. Make the gesture a few times and set the
-  slider a little below your usual peak, high enough that talking doesn't reach it. A gesture
+  slider a little below your usual peak, high enough that talking doesn't reach it. Easier:
+  **Measure my gestures** asks you to relax, then make each gesture and hold it (about 20
+  seconds), and sets each slider halfway between your relaxed face and the gesture. It also says
+  which gestures the webcam sees clearly and which are hard to see. A gesture
   must be held for **Hold the gesture for** (0.15 s) before it counts, and it lets go a little
   below the slider, so it doesn't flicker.
 - **What each can do:**

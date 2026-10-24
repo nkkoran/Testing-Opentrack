@@ -77,6 +77,14 @@ class ActionTests(unittest.TestCase):
         self.assertFalse(needs_face(settings()))
         self.assertTrue(needs_face(settings(actions={"enabled": True})))   # meters work before binding
 
+    def test_suggested_thresholds(self):
+        threshold, verdict = actions.suggest_threshold([0.05, 0.1, 0.08] * 10, [0.7, 0.8, 0.75] * 10)
+        self.assertEqual(verdict, "clear")
+        self.assertTrue(0.1 < threshold < 0.75)
+        self.assertEqual(actions.suggest_threshold([0.1] * 10, [0.15] * 10)[0], None)
+        self.assertEqual(actions.suggest_threshold([], [0.5])[1], "not measured")
+        self.assertTrue(actions.suggest_threshold([0.1] * 10, [0.35] * 10)[1].startswith("weak"))
+
     def test_validation(self):
         with self.assertRaises(config.SettingsError):
             settings(actions={"key1_action": "explode"})

@@ -169,3 +169,18 @@ def uses_gestures(settings):
 
 def thresholds(settings):
     return {g: getattr(settings.actions, f"{g}_threshold") for g in GESTURES}
+
+
+def suggest_threshold(rest, peak):
+    """From levels seen while relaxed and while making a gesture: (threshold or None, verdict).
+    The threshold sits between the relaxed level (its 95th percentile) and the gesture level
+    (its median), so a clear gesture counts and an ordinary face doesn't."""
+    if not rest or not peak:
+        return None, "not measured"
+    rest_level = sorted(rest)[min(len(rest) - 1, int(len(rest) * 0.95))]
+    peak_level = sorted(peak)[len(peak) // 2]
+    gap = peak_level - rest_level
+    if gap < 0.12:
+        return None, "hard to see - try another gesture"
+    threshold = round(min(0.95, max(0.1, rest_level + gap * 0.5)) * 20) / 20
+    return threshold, "clear" if gap >= 0.3 else "weak - make it bigger, or try another"

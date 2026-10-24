@@ -1471,7 +1471,10 @@ class SettingsWindow(Child):
                                "it must go to count. Make the gesture a few times and set the slider a little "
                                "below your usual peak - high enough that talking doesn't reach it.",
                      font=font(11), text_color=MUTED, wraplength=440, justify="left", anchor="w").pack(fill="x", padx=14)
+        small_button(box, "Measure my gestures", self._measure_gestures, width=180).pack(anchor="w", padx=14,
+                                                                                          pady=(8, 0))
         self.gesture_meters = {}
+        self.gesture_thresholds = {}
         for g, name in actions.GESTURES.items():
             row = ctk.CTkFrame(box, fg_color="transparent")
             row.pack(fill="x", padx=14, pady=(10, 0))
@@ -1488,6 +1491,7 @@ class SettingsWindow(Child):
             threshold.frame.pack(fill="x", padx=14, pady=(2, 0))
             threshold.set(getattr(a, f"{g}_threshold"))
             self.gesture_meters[g] = meter
+            self.gesture_thresholds[g] = threshold
         self.hold_row = SliderRow(box, "Hold the gesture for", 0, 0.6, 0.05, lambda v: f"{v:.2f} s",
                                   lambda v: self._set("actions", gesture_hold=round(v, 2)),
                                   "Shorter reacts sooner; longer ignores quick expressions like talking")
@@ -1502,6 +1506,15 @@ class SettingsWindow(Child):
                                "click. Switch this off if the camera pauses while you talk.", font=font(11),
                      text_color=MUTED, wraplength=440, justify="left", anchor="w").pack(fill="x", padx=14)
         ctk.CTkFrame(box, height=12, fg_color="transparent").pack()
+
+    def _measure_gestures(self):
+        def done(thresholds):
+            for g, value in thresholds.items():
+                self.gesture_thresholds[g].set(value)
+            self._set("actions", **{f"{g}_threshold": v for g, v in thresholds.items()})
+            if thresholds:
+                self.saved_label.configure(text="Gesture thresholds set from your measurement - press Save to keep them")
+        GestureCalWindow(self.main, done)
 
     def _capture_action_key(self, i):
         self._capturing_action = i
@@ -2203,6 +2216,97 @@ def run_gui(settings_path, base_dir, dry_run=False, engine=None):
     MainWindow(root, engine)
     root.mainloop()
     return 0
+
+
+class GestureCalWindow(Child):
+    """Measures each face gesture: relaxed first, then each gesture held, and suggests thresholds."""
+
+    PROMPTS = {"mouth": "Open your mouth wide", "brows": "Raise your eyebrows", "smile": "Smile broadly",
+               "pucker": "Pucker your lips (like a kiss)"}
+    RELAX, HOLD, LEAD = 3.0, 2.5, 0.8   # seconds: relaxed, holding a gesture, getting into it
+
+    def __init__(self, main, on_done):
+        super().__init__(main, "HeadMouse - measure gestures", "520x420")
+        self.on_done = on_done
+        self.rest = {g: [] for g in actions.GESTURES}
+        self.peak = {g: [] for g in actions.GESTURES}
+        self.plan = [("rest", None)] + [(g, g) for g in actions.GESTURES]
+        self.step, self.step_start = -1, None
+        self.results = {}
+        bar = ctk.CTkFrame(self.top, fg_color="transparent")
+        bar.pack(side="bottom", fill="x", padx=24, pady=(6, 18))
+        self.primary = primary_button(bar, "Start", self.start, width=180)
+        self.primary.pack(side="right")
+        secondary_button(bar, "Cancel", self.close, width=140).pack(side="left")
+        body = card(self.top)
+        body.pack(fill="both", expand=True, padx=24, pady=(18, 6))
+        self.title = ctk.CTkLabel(body, text="Measure my gestures", font=font(22, "bold"), text_color=TEXT,
+                                  anchor="w")
+        self.title.pack(fill="x", padx=20, pady=(18, 4))
+        self.text = ctk.CTkLabel(body, text="Face the camera. First relax your face for a few seconds, then make "
+                                            "each gesture when asked and hold it. It takes about 20 seconds.",
+                                 font=font(14), text_color=MUTED, wraplength=440, justify="left", anchor="w")
+        self.text.pack(fill="x", padx=20)
+        self.meter = ctk.CTkProgressBar(body, height=12, progress_color=ACCENT, fg_color=TRACK)
+        self.meter.pack(fill="x", padx=20, pady=(18, 0))
+        self.meter.set(0)
+
+    def start(self):
+        if not self.engine.snapshot().face:
+            self.text.configure(text="The camera isn't reading your face yet. Switch on \"Use click actions\", "
+                                     "wait a few seconds and face the camera.", text_color=DANGER)
+            return
+        self.primary.configure(state="disabled", text="Measuring...")
+        self._next()
+        self._poll()
+
+    def _next(self):
+        self.step += 1
+        self.step_start = time.monotonic()
+        if self.step >= len(self.plan):
+            self._finish()
+            return
+        what, gesture = self.plan[self.step]
+        if gesture is None:
+            self.title.configure(text="Relax your face")
+            self.text.configure(text="Look at the screen with a normal face.", text_color=MUTED)
+        else:
+            self.title.configure(text=self.PROMPTS[gesture])
+            self.text.configure(text="...and hold it until the bar is full.", text_color=MUTED)
+
+    def _poll(self):
+        if not self.alive() or self.step >= len(self.plan):
+            return
+        what, gesture = self.plan[self.step]
+        elapsed = time.monotonic() - self.step_start
+        length = self.RELAX if gesture is None else self.LEAD + self.HOLD
+        face = self.engine.snapshot().face or {}
+        if face:
+            if gesture is None:
+                for g in actions.GESTURES:
+                    self.rest[g].append(face.get(g, 0.0))
+            elif elapsed >= self.LEAD:
+                self.peak[gesture].append(face.get(gesture, 0.0))
+        self.meter.set(min(1.0, elapsed / length))
+        if elapsed >= length:
+            self._next()
+        self.top.after(50, self._poll)
+
+    def _finish(self):
+        lines = []
+        for g, name in actions.GESTURES.items():
+            threshold, verdict = actions.suggest_threshold(self.rest[g], self.peak[g])
+            self.results[g] = threshold
+            lines.append(f"{name}: {verdict}" + (f"  (counts from {threshold * 100:.0f}%)" if threshold else ""))
+        self.title.configure(text="Done")
+        self.text.configure(text="\n".join(lines) + "\n\nUse the clear ones for actions you need often.",
+                            text_color=TEXT)
+        self.meter.set(1)
+        self.primary.configure(state="normal", text="Use these", command=self.use)
+
+    def use(self):
+        self.on_done({g: t for g, t in self.results.items() if t is not None})
+        self.close()
 
 
 class GuideWindow(Child):
