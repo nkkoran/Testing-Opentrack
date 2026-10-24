@@ -1476,6 +1476,14 @@ class SettingsWindow(Child):
                                   "Shorter reacts sooner; longer ignores quick expressions like talking")
         self.hold_row.frame.pack(fill="x", padx=14, pady=(12, 0))
         self.hold_row.set(a.gesture_hold)
+        self.steady_switch = switch(box, "Keep the aim still while a gesture starts or ends", lambda: self._set(
+            "actions", steady_gestures=bool(self.steady_switch.get())), font=font(13), text_color=TEXT)
+        if a.steady_gestures:
+            self.steady_switch.select()
+        self.steady_switch.pack(anchor="w", padx=14, pady=(12, 0))
+        ctk.CTkLabel(box, text="Opening your mouth tilts your face a little, which would nudge the aim as you "
+                               "click. Switch this off if the camera pauses while you talk.", font=font(11),
+                     text_color=MUTED, wraplength=440, justify="left", anchor="w").pack(fill="x", padx=14)
         ctk.CTkFrame(box, height=12, fg_color="transparent").pack()
 
     def _capture_action_key(self, i):

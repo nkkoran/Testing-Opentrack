@@ -31,6 +31,9 @@ BUTTONS = ("left", "right", "middle")
 CLICK_SECONDS = 0.06     # a click holds the button this long, so every game notices it
 SMOOTHING = 0.08         # seconds: gesture scores are averaged over about this long
 RELEASE = 0.75           # a gesture ends when it falls below this share of its threshold
+STEADY_FROM = 0.3        # steady camera: from this share of the threshold on the way up...
+STEADY_AFTER = 0.25      # ...until this long after the gesture starts or ends
+STEADY_MAX_RISE = 0.3    # but never longer than this for a gesture that may be starting (talking moves the mouth too)
 
 
 def face_scores(blendshapes):
@@ -50,15 +53,20 @@ class GestureDetector:
         self.level = {}       # smoothed scores
         self.active = set()
         self._above = {}      # since when each gesture has been above its threshold
+        self._changed = {}    # when each gesture last started or ended
+        self.raw = {}         # latest unsmoothed scores (to notice a gesture starting as early as possible)
+        self._rising = {}     # since when each gesture may be starting
 
     def update(self, scores, now, dt, thresholds, hold):
         """scores: {gesture: 0..1} or None (no face). Returns the set of active gestures."""
         if scores is None:
             self.level.clear()
             self._above.clear()
+            self._changed.clear()
             self.active = set()
             return self.active
         a = 1.0 - math.exp(-dt / SMOOTHING) if dt > 0 else 1.0
+        self.raw = dict(scores)
         for name, value in scores.items():
             level = self.level.get(name, value)
             level += (value - level) * a
@@ -68,13 +76,30 @@ class GestureDetector:
                 if level < threshold * RELEASE:
                     self.active.discard(name)
                     self._above.pop(name, None)
+                    self._changed[name] = now
             elif level >= threshold:
                 since = self._above.setdefault(name, now)
                 if now - since >= hold:
                     self.active.add(name)
+                    self._changed[name] = now
             else:
                 self._above.pop(name, None)
         return self.active
+
+    def changing(self, now, thresholds, gestures):
+        """True while one of `gestures` is starting or ending - the face is moving, so the head
+        angle may jump a little (opening the mouth tilts the face)."""
+        for name in gestures:
+            level = max(self.level.get(name, 0.0), self.raw.get(name, 0.0))
+            threshold = thresholds.get(name, 1.1)
+            if name not in self.active and level >= threshold * STEADY_FROM:
+                if now - self._rising.setdefault(name, now) < STEADY_MAX_RISE:
+                    return True                   # on the way up
+                continue
+            self._rising.pop(name, None)
+            if now - self._changed.get(name, -1e9) < STEADY_AFTER:
+                return True                       # just started or ended
+        return False
 
 
 @dataclass

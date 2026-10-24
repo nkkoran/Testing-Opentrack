@@ -159,6 +159,41 @@ class EngineActionTests(unittest.TestCase):
         self.assertTrue(app.action_precision)
         self.assertIn("precision", app.state)
 
+    def test_camera_keeps_still_while_a_gesture_starts(self):
+        free, steady = self.check_gesture_onset(False), self.check_gesture_onset(True)
+        self.assertGreater(free, 3.0)
+        self.assertLess(steady, free * 0.5)                     # most of the nudge is gone
+
+    def check_gesture_onset(self, steady):
+        s = settings(general={"start_enabled": True}, assist={"hybrid": True},
+                     actions={"enabled": True, "mouth_action": "right", "steady_gestures": steady})
+        src, backend = FaceSource(), NullInput()
+        backend.window_title = "Enshrouded"
+        app = HeadMouse(s, src, backend)
+        rest = {"mouth": 0.0, "brows": 0, "smile": 0, "pucker": 0}
+        self.ticks(app, src, 0.3, face=rest)
+        src.yaw = 0
+        moved = []
+        for i in range(round(0.6 / DT)):                     # mouth opening: the head angle jumps 3 deg
+            self.t += DT
+            mouth = min(0.9, i * DT * 3)
+            src.set(self.t, {**rest, "mouth": mouth})
+            src.sample = src.sample.__class__(3.0 * mouth, 0.0, (0, 0, 0, 3.0 * mouth, 0, src.seq), self.t, src.seq,
+                                              face={**rest, "mouth": mouth})
+            app.tick(self.t)
+            moved.append(app.result.yaw_speed)
+        self.assertIn("right", app.buttons_down)
+        return sum(abs(v) for v in moved) * DT
+
+    def test_talking_does_not_keep_the_camera_paused(self):
+        d = actions.GestureDetector()
+        t, steady = 0.0, 0
+        for i in range(round(2.0 / DT)):                       # jaw moving while talking, below the threshold
+            t += DT
+            d.update({"mouth": 0.25 + 0.1 * ((i // 10) % 2)}, t, DT, {"mouth": 0.5}, 0.15)
+            steady += d.changing(t, {"mouth": 0.5}, ["mouth"])
+        self.assertLess(steady * DT, 0.4)
+
     def test_dry_run_sends_no_buttons(self):
         s = settings(general={"start_enabled": True}, actions={"enabled": True, "key1": "CAPSLOCK",
                                                                "key1_action": "left"})

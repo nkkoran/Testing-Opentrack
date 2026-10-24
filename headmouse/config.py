@@ -216,6 +216,7 @@ class ActionSettings:
     pucker_action: str = ""      # ...pucker lips
     pucker_threshold: float = 0.6
     gesture_hold: float = 0.15   # seconds a gesture must be held before it counts
+    steady_gestures: bool = True  # hold the camera still for a moment while a gesture starts or ends
 
 
 @dataclass

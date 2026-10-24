@@ -192,13 +192,14 @@ class MotionController:
         self._active = [False, False]  # mouse delay: moving already (no delay until the head rests again)
         self._rest = [0.0, 0.0]        # mouse delay: how long the mouse-like movement has been still
 
-    def _stop(self, result):
-        """Stop all movement and throw away leftover fractions of a count."""
+    def _stop(self, result, brief=False):
+        """Stop all movement and throw away leftover fractions of a count. brief: only a moment
+        (e.g. while a face gesture starts), so no need to come back to the middle afterwards."""
         self._acc_x = self._acc_y = 0.0
         self.reset_follow()  # follow modes pick up from wherever the head is next
         self.yaw_axis.reset()
         self.pitch_axis.reset()
-        if self.s.motion.require_center_to_resume:
+        if self.s.motion.require_center_to_resume and not brief:
             self._need_center = True
         result.waiting_for_center = self._need_center
         return result
@@ -233,12 +234,13 @@ class MotionController:
         self._active = [False, False]
         self._rest = [0.0, 0.0]
 
-    def step(self, angles, dt, hold=False, precision=False, eye_pitch=None, blink=0.0):
+    def step(self, angles, dt, hold=False, precision=False, eye_pitch=None, blink=0.0, steady=False):
         """Advance one tick.
 
         angles    -- (yaw, pitch) from orient(), or None when tracking is not usable
         dt        -- seconds since the previous tick
         hold      -- True while paused, disabled or otherwise not allowed to move
+        steady    -- True to keep still for a moment (a face gesture is starting or ending)
         precision -- True while precision (slow) mode is held
         eye_pitch -- eye direction score from the webcam (+ up), None if unknown
         blink     -- how closed the eyes are (0-1)
@@ -262,6 +264,8 @@ class MotionController:
 
         if hold or result.glancing:
             return self._stop(result)
+        if steady:
+            return self._stop(result, brief=True)
 
         if self._need_center:
             if self.yaw_axis.in_deadzone(yaw) and self.pitch_axis.in_deadzone(pitch):

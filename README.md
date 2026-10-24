@@ -310,8 +310,10 @@ the keyboard:
 - A held right button should also count as the aiming key for **Situations**, so "open mouth to
   aim" can switch to the aiming feel too. Check that the Situations tab shows Aiming while you
   hold the gesture.
-- Opening the mouth moves the face a little, which can nudge the camera as you click. Eyebrows or
-  a key are steadier for precise shots.
+- Opening the mouth tilts the face a little, which would nudge the aim as you click. So
+  **Keep the aim still while a gesture starts or ends** holds the camera for a moment then (at
+  most 0.3 s while a gesture might be starting, so talking doesn't keep it paused). Switch it off if
+  the camera pauses while you talk. Eyebrows or a key are steadier still for precise shots.
 
 ### Glancing away (e.g. at the keyboard): optional
 

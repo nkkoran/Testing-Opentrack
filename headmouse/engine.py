@@ -87,6 +87,7 @@ class HeadMouse:
         self.buttons_down = set()             # mouse buttons HeadMouse is holding down
         self.action_precision = False         # precision aim / freeze switched on by an action
         self.action_freeze = False
+        self.gesture_steady = False           # a gesture is starting or ending: camera held still
         self._pointer = False       # the game shows a mouse pointer (steady for POINTER_STABLE_SECONDS)
         self._pointer_seen, self._pointer_since = False, 0.0
         self.settings = None
@@ -145,6 +146,9 @@ class HeadMouse:
         for gesture in self.gestures.update(face, now, dt, actions.thresholds(self.settings), a.gesture_hold):
             held[f"face:{gesture}"] = True
         out = self.actions.update(self._bindings, held, now)
+        bound = [source[5:] for source, _ in self._bindings if source.startswith("face:")]
+        self.gesture_steady = a.steady_gestures and bool(bound) and \
+            self.gestures.changing(now, actions.thresholds(self.settings), bound)
         if not (self.enabled and focused is not False and not self.practice and not self.holds):
             self.actions.reset()     # only in the game with head control on: never click elsewhere
             out = actions.Output(set(), [])
@@ -273,7 +277,8 @@ class HeadMouse:
         else:
             hold = paused or not self.enabled or not window_ok or bool(self.holds)
         self.result = self.controller.step(angles, dt, hold=hold, precision=precision,
-                                           eye_pitch=self.eye_pitch, blink=blink)
+                                           eye_pitch=self.eye_pitch, blink=blink,
+                                           steady=self.gesture_steady)   # face moving for a gesture
         if self.practice:
             self.practice_camera[0] += self.result.yaw_speed * dt
             self.practice_camera[1] += self.result.pitch_speed * dt

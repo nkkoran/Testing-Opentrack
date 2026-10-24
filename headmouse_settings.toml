@@ -227,6 +227,9 @@ smile_threshold = 0.6
 pucker_action = ""
 pucker_threshold = 0.6
 gesture_hold = 0.15
+# Hold the camera still for a moment while a gesture starts or ends (opening
+# the mouth tilts the face a little, which would nudge the aim).
+steady_gestures = true
 
 
 # -----------------------------------------------------------------------------
