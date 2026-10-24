@@ -1558,6 +1558,8 @@ class SettingsWindow(Child):
         held = ", ".join(snap.buttons) or "none"
         seen = ", ".join(actions.GESTURES[g].lower() for g in snap.gestures) or "none"
         note = "" if face or not self.work.actions.enabled else "  ·  (gestures need the built-in webcam)"
+        if not self.work.general.game_window_title.strip():
+            note += "  ·  set the game's window title (Game tab): clicks are only sent in that window"
         self.actions_now.configure(text=f"Mouse buttons held: {held}  ·  gestures: {seen}{note}")
 
     # --- Tracking ------------------------------------------------------------

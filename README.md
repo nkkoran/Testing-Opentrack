@@ -311,7 +311,8 @@ the keyboard:
   - a single left or right click,
   - left or right button on/off (tap to hold it down, tap again to let go),
   - re-center, precision aim on/off, or freeze the camera on/off.
-- **Safety:** buttons are only pressed while head control is on and the game window is in front,
+- **Safety:** buttons are only pressed while head control is on and the game window (its title is
+  set under Settings → Game) is in front,
   never during the practice game, and every button is let go when head control turns off or
   HeadMouse closes. The window shows which buttons HeadMouse is holding.
 - A held right button should also count as the aiming key for **Situations**, so "open mouth to

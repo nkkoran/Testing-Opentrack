@@ -149,8 +149,8 @@ class HeadMouse:
         bound = [source[5:] for source, _ in self._bindings if source.startswith("face:")]
         self.gesture_steady = a.steady_gestures and bool(bound) and \
             self.gestures.changing(now, actions.thresholds(self.settings), bound)
-        if not (self.enabled and focused is not False and not self.practice and not self.holds):
-            self.actions.reset()     # only in the game with head control on: never click elsewhere
+        if not (self.enabled and focused is True and not self.practice and not self.holds):
+            self.actions.reset()     # only in the game window with head control on: never click elsewhere
             out = actions.Output(set(), [])
         for command in out.commands:
             if command == "recenter":

@@ -208,7 +208,8 @@ sound = true
 #  Keys are only watched, so the game also receives them - choose keys it
 #  doesn't use, or a foot pedal. Gestures need the built-in webcam: the score
 #  (0-1) must reach the threshold for gesture_hold seconds; it lets go a bit
-#  below it. Buttons are only sent while head control is on in the game.
+#  below it. Buttons are only sent while head control is on and the game
+#  window (general.game_window_title) is in front.
 # -----------------------------------------------------------------------------
 [actions]
 enabled = false
