@@ -2187,7 +2187,8 @@ class QuickFixWindow(Child):
         super().__init__(main, "HeadMouse quick fixes", "560x760")
         self.axis = axis
         self.current = self.engine.settings   # the engine applies changes a moment later
-        self.history = []   # settings before each change, for Undo
+        self.target = None                     # None = the normal feel, else a situation's feel
+        self.history = []   # (normal settings, situation, preset name, feel) before each change, for Undo
         buttons = ctk.CTkFrame(self.top, fg_color="transparent")
         buttons.pack(side="bottom", fill="x", padx=24, pady=(6, 18))
         primary_button(buttons, "Done", self.close, width=150).pack(side="right")
@@ -2203,6 +2204,17 @@ class QuickFixWindow(Child):
                                 "try it in the game, and tap again if it needs more. Every change is saved "
                                 "and can be undone.", font=font(13), text_color=MUTED, wraplength=440,
                      justify="left", anchor="w").pack(fill="x", padx=14)
+        feels = ["Normal"] + [config.SITUATION_NAMES[n] for n in config.SITUATIONS[1:] + config.SITUATIONS[:1]
+                              if getattr(self.current.situations, f"{n}_preset")]
+        self.target_buttons = None
+        if len(feels) > 1:
+            ctk.CTkLabel(body, text="Which feel is wrong?", font=font(13, "bold"), text_color=TEXT,
+                         anchor="w").pack(fill="x", padx=14, pady=(12, 0))
+            self.target_buttons = segmented(body, feels, self._target_selected, height=36)
+            self.target_buttons.pack(fill="x", padx=14, pady=(4, 0))
+            last = self.engine.snapshot().situation
+            self.target_buttons.set(config.SITUATION_NAMES[last] if last else "Normal")
+            self.target = last
         self.axis_buttons = segmented(body, ["Left & right", "Up & down"], self._axis_selected, height=40)
         self.axis_buttons.pack(fill="x", padx=14, pady=(14, 4))
         self.axis_buttons.set("Left & right" if axis == "x" else "Up & down")
@@ -2215,35 +2227,49 @@ class QuickFixWindow(Child):
         self.result.pack(fill="x", padx=14, pady=(4, 8), after=self.mode_label)
         self._show_fixes()
 
+    def _target_selected(self, label):
+        self.target = next((n for n in config.SITUATIONS if config.SITUATION_NAMES[n] == label), None)
+        self.result.configure(text="")
+        self._show_fixes()
+
     def _axis_selected(self, label):
         self.axis = "x" if label == "Left & right" else "y"
         self._show_fixes()
 
+    def _feel(self):
+        try:
+            return quickfix.target_feel(self.engine.path, self.current, self.target)
+        except config.SettingsError:
+            return self.current, None
+
     def _show_fixes(self):
         for w in self.fix_frame.winfo_children():
             w.destroy()
-        s = self.current
+        s, preset = self._feel()
         mode = config.axis_modes(s)[0 if self.axis == "x" else 1]
-        used = [config.SITUATION_NAMES[n] for n in config.SITUATIONS if getattr(s.situations, f"{n}_preset")]
-        note = (f"\nThese change your normal feel. The {', '.join(used)} feel is its own preset "
-                "(Settings > Feel).") if used else ""
-        self.mode_label.configure(text=f"Uses {SettingsWindow.MODE_LABELS[mode]} (change it in Settings > Feel)"
-                                       + note, wraplength=440, justify="left")
+        where = f'the preset "{preset}"' if preset else "your normal feel"
+        self.mode_label.configure(text=f"Uses {SettingsWindow.MODE_LABELS[mode]}. Changes go into {where}.",
+                                  wraplength=440, justify="left")
         for fix in quickfix.available(s, self.axis):
             secondary_button(self.fix_frame, fix.label, lambda k=fix.key: self.apply(k), height=40,
                              anchor="w").pack(fill="x", pady=3)
 
     def apply(self, key):
-        old = self.current
-        new, lines = quickfix.apply(old, self.axis, key)
+        feel, preset = self._feel()
+        new_feel, lines = quickfix.apply(feel, self.axis, key)
         if not lines:
             self.result.configure(text="That's already as far as it goes. Try another fix, or look at "
                                        "Settings > Feel.", text_color=MUTED)
             return
-        self.history.append(old)
+        try:
+            new = quickfix.store(self.engine.path, self.current, self.target, preset, new_feel)
+        except config.SettingsError as e:
+            messagebox.showerror("HeadMouse", str(e), parent=self.top)
+            return
+        self.history.append((self.current, self.target, preset, feel))
         self.current = new
         self.engine.apply_settings(new, save=True)
-        tip = quickfix.tip(old, self.axis, key)
+        tip = quickfix.tip(feel, self.axis, key)
         self.result.configure(text="Changed:\n" + "\n".join(f"•  {line}" for line in lines)
                               + (f"\n\nTip: {tip}" if tip else ""), text_color=TEXT)
         self.undo_button.configure(state="normal")
@@ -2252,7 +2278,9 @@ class QuickFixWindow(Child):
     def undo(self):
         if not self.history:
             return
-        self.current = self.history.pop()
+        self.current, situation, preset, feel = self.history.pop()
+        if situation is not None and not config.is_builtin_preset(preset):
+            config.save_preset(self.engine.path, preset, feel)   # the preset as it was
         self.engine.apply_settings(self.current, save=True)
         self.result.configure(text="Undone - back to how it was before that change.", text_color=MUTED)
         if not self.history:
@@ -2301,9 +2329,19 @@ class PracticeWindow(Child):
                                       "clearly works better. Short breaks between parts come by themselves; "
                                       "nothing changes unless you choose to keep it at the end.")
         self.text.pack(fill="x", padx=22)
-        self.focus = segmented(body, list(practice.FOCUSES.values()), None, height=40)
+        self.choices = ctk.CTkFrame(body, fg_color="transparent")
+        self.choices.pack(fill="x", padx=22, pady=(12, 0))
+        self.focus = segmented(self.choices, list(practice.FOCUSES.values()), None, height=40)
         self.focus.set(practice.FOCUSES["all"])
-        self.focus.pack(fill="x", padx=22, pady=(12, 0))
+        self.focus.pack(fill="x")
+        feels = ["Normal feel"] + [f"{config.SITUATION_NAMES[n]} feel" for n in config.SITUATIONS[1:] +
+                                   config.SITUATIONS[:1] if getattr(self.original.situations, f"{n}_preset")]
+        self.target, self.target_preset = None, None
+        self.feel_choice = None
+        if len(feels) > 1:
+            self.feel_choice = segmented(self.choices, feels, self._feel_chosen, height=34)
+            self.feel_choice.set("Normal feel")
+            self.feel_choice.pack(fill="x", pady=(8, 0))
         self.k = window_scaling(self.top)
         self.canvas = tk.Canvas(body, width=int(700 * self.k), height=int(380 * self.k), highlightthickness=0, bd=0)
         self.canvas.pack(padx=20, pady=12)
@@ -2316,12 +2354,22 @@ class PracticeWindow(Child):
 
     # flow --------------------------------------------------------------------
 
+    def _feel_chosen(self, label):
+        self.target = next((n for n in config.SITUATIONS if f"{config.SITUATION_NAMES[n]} feel" == label), None)
+        if self.target in ("aim", "build"):
+            self.focus.set(practice.FOCUSES["aim"])
+
     def start(self):
         focus = next(k for k, v in practice.FOCUSES.items() if v == self.focus.get())
         self.engine.apply_settings(self.original, save=False)
-        self.checkup = practice.Checkup(self.original, focus=focus)
+        try:
+            feel, self.target_preset = quickfix.target_feel(self.engine.path, self.original, self.target)
+        except config.SettingsError as e:
+            messagebox.showerror("HeadMouse", str(e), parent=self.top)
+            return
+        self.checkup = practice.Checkup(feel, focus=focus)
         self.done_blocks = 0
-        self.focus.pack_forget()
+        self.choices.pack_forget()
         self.primary.configure(state="disabled", text="Playing...")
         self.secondary.configure(text="Stop", command=self.close)
         self._begin(self.checkup.next_block())
@@ -2371,7 +2419,8 @@ class PracticeWindow(Child):
             lines.append(f"Holding still: wobble {c.scores['steady'][0]:.2f}° "
                          + ("(steady)" if c.scores["steady"][0] <= practice.WOBBLY else "(a bit shaky)"))
         changes = practice.changes(c.original, c.best)
-        self.focus.pack_forget()
+        if self.target is not None:
+            changes = [f'In "{self.target_preset}": {line}' for line in changes]
         self.canvas.delete("all")
         if c.changed and changes:
             self.heading.configure(text="Found settings that work better for you")
@@ -2400,13 +2449,18 @@ class PracticeWindow(Child):
 
     def _use_new(self):
         self.engine.set_practice(False)
-        self.engine.apply_settings(self.checkup.best, save=True)      # saved (and the old settings backed up)
+        try:
+            new = quickfix.store(self.engine.path, self.original, self.target, self.target_preset, self.checkup.best)
+        except config.SettingsError as e:
+            messagebox.showerror("HeadMouse", str(e), parent=self.top)
+            return
+        self.engine.apply_settings(new, save=True)      # saved (and the old settings backed up)
         self.engine.play_sound("done")
         self.top.destroy()
 
     def _restart(self):
         self.engine.apply_settings(self.original, save=False)
-        self.focus.pack(fill="x", padx=22, pady=(12, 0), before=self.canvas)
+        self.choices.pack(fill="x", padx=22, pady=(12, 0), before=self.canvas)
         self.primary.configure(text="Start", command=self.start, state="normal")
         self.secondary.configure(text="Cancel", command=self.close)
         self.heading.configure(text="Find my best settings")

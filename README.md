@@ -140,7 +140,9 @@ right or up & down: big turns too slow or too fast, small aiming jumpy or sticky
 holding still, laggy, keeps moving after stopping, turning starts during small aiming, and (up &
 down) glancing at the keyboard moves the camera. Tap one and HeadMouse makes a small change for
 that pair, in the mode it uses, and shows exactly what changed. It is used and saved straight
-away: try it in the game, tap again if it needs more, or **Undo last change**.
+away: try it in the game, tap again if it needs more, or **Undo last change**. With Situations
+set up, first choose **which feel is wrong** (Normal, Aiming, Building, Menus): a fix for the
+aiming feel goes into the aiming preset, not your normal feel.
 
 ### Let HeadMouse find the settings: the practice game
 
@@ -164,8 +166,10 @@ not moved and head control doesn't need to be on. Choose what to practise:
 
 Blocks follow each other after a short countdown, so no clicking is needed. At the end HeadMouse
 shows the scores before and after, exactly what would change, and what it tried. **Nothing is kept
-unless you press "Use the new settings"**, and the old settings are backed up even then. Your
-normal feel is always what's measured (Situations are paused during practice).
+unless you press "Use the new settings"**, and the old settings are backed up even then.
+Situations are paused during practice. With Situations set up you can also choose to practise
+with, and tune, your **Aiming**, **Building** or **Menus** feel; the result then goes into that
+feel's preset.
 
 ### Presets
 

@@ -1,6 +1,8 @@
 """Quick fixes: plain-language problems turned into small, valid setting changes."""
 
+import tempfile
 import unittest
+from pathlib import Path
 
 from headmouse import config, quickfix
 from tests.test_core import settings
@@ -60,6 +62,47 @@ class QuickFixTests(unittest.TestCase):
         new, lines = quickfix.apply(s, "x", "shaky")
         self.assertEqual(new.webcam, s.webcam)
         self.assertGreater(new.assist.wobble_x, s.assist.wobble_x)
+
+
+class SituationFeelTests(unittest.TestCase):
+    def setUp(self):
+        self.path = Path(tempfile.mkdtemp()) / "headmouse_settings.toml"
+
+    def test_fixing_the_aiming_feel_changes_its_preset_only(self):
+        aim = settings(assist={"hybrid": True, "hybrid_gain_x": 1.0})
+        config.save_preset(self.path, "Aiming", aim)
+        base = settings(situations={"aim_preset": "Aiming"}, assist={"hybrid_gain_x": 3.0})
+        feel, preset = quickfix.target_feel(self.path, base, "aim")
+        self.assertEqual((preset, feel.assist.hybrid_gain_x), ("Aiming", 1.0))
+        fixed, lines = quickfix.apply(feel, "x", "jumpy")
+        new_base = quickfix.store(self.path, base, "aim", preset, fixed)
+        self.assertEqual(new_base.assist.hybrid_gain_x, 3.0)                       # normal feel untouched
+        self.assertEqual(config.load_preset(self.path, "Aiming", new_base).assist.hybrid_gain_x, 0.8)
+
+    def test_helpers_still_go_to_the_normal_settings(self):
+        config.save_preset(self.path, "Aiming", settings(assist={"hybrid": True}))
+        base = settings(situations={"aim_preset": "Aiming"})
+        feel, preset = quickfix.target_feel(self.path, base, "aim")
+        fixed, _ = quickfix.apply(feel, "x", "drifts")                          # switches on return_stop
+        new_base = quickfix.store(self.path, base, "aim", preset, fixed)
+        self.assertTrue(new_base.assist.return_stop)
+        self.assertFalse(new_base.assist.hybrid)                                   # the preset's mode stays there
+
+    def test_built_in_preset_gets_an_adjusted_copy(self):
+        base = settings(situations={"aim_preset": config.DEFAULT_PRESET})
+        feel, preset = quickfix.target_feel(self.path, base, "aim")
+        fixed, _ = quickfix.apply(feel, "x", "too_fast")
+        new_base = quickfix.store(self.path, base, "aim", preset, fixed)
+        self.assertEqual(new_base.situations.aim_preset, "Aiming (adjusted)")
+        self.assertLess(config.load_preset(self.path, "Aiming (adjusted)", new_base).right.max_speed,
+                        base.right.max_speed)
+
+    def test_normal_feel_is_unchanged_behaviour(self):
+        base = settings()
+        feel, preset = quickfix.target_feel(self.path, base, None)
+        self.assertIs(feel, base)
+        fixed, _ = quickfix.apply(feel, "x", "too_fast")
+        self.assertIs(quickfix.store(self.path, base, None, None, fixed), fixed)
 
 
 if __name__ == "__main__":

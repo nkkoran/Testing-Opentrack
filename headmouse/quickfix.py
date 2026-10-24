@@ -195,3 +195,38 @@ def tip(settings, axis, key):
     if key == "shaky" and settings.tracking.source == "webcam":
         return "even light on your face makes the webcam steadier than any setting."
     return None
+
+
+# --- fixing a situation's feel (its preset) ------------------------------------------
+
+def target_feel(path, base, situation):
+    """(feel, preset name) to fix: the normal settings (situation None), or a situation's preset."""
+    from .config import load_preset
+    if situation is None:
+        return base, None
+    preset = getattr(base.situations, f"{situation}_preset")
+    return load_preset(path, preset, base), preset
+
+
+def store(path, base, situation, preset, new_feel):
+    """Keep a fixed feel. For a situation, the preset part goes into its preset (a copy named
+    "<Situation> (adjusted)" if it is built in) and anything else into the normal settings.
+    Returns the new normal settings."""
+    from .config import PRESET_ASSIST, PRESET_SECTIONS, SITUATION_NAMES, is_builtin_preset, save_preset
+    if situation is None:
+        return new_feel
+    name = f"{SITUATION_NAMES[situation]} (adjusted)" if is_builtin_preset(preset) else preset
+    save_preset(path, name, new_feel)
+    out = base
+    for f in dataclasses.fields(base):
+        if f.name in PRESET_SECTIONS and f.name != "assist":
+            continue
+        section = getattr(new_feel, f.name)
+        if f.name == "assist":   # only the helpers, not the preset's own mouse-like settings
+            section = dataclasses.replace(base.assist, **{k: getattr(section, k)
+                                                          for k in vars(section) if k not in PRESET_ASSIST})
+        out = dataclasses.replace(out, **{f.name: section})
+    if name != preset:
+        out = dataclasses.replace(out, situations=dataclasses.replace(out.situations,
+                                                                      **{f"{situation}_preset": name}))
+    return out
