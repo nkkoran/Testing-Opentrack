@@ -2604,6 +2604,10 @@ class PracticeWindow(Child):
             before, after = c.scores["precision"]
             better = f" ({(after / before - 1) * 100:.0f}% better)" if before > 0 and after > before * 1.01 else ""
             lines.append(f"Small aiming score: {before:.2f} → {after:.2f}{better}")
+        if "updown" in c.scores:
+            before, after = c.scores["updown"]
+            better = f" ({(after / before - 1) * 100:.0f}% better)" if before > 0 and after > before * 1.01 else ""
+            lines.append(f"Up & down aiming score: {before:.2f} → {after:.2f}{better}")
         if "turns" in c.scores:
             before, after = c.scores["turns"]
             lines.append(f"Big turns: {before:.1f} s → {after:.1f} s per target")
@@ -2727,7 +2731,7 @@ class PracticeWindow(Child):
     def _progress(self):
         if self.checkup is None or self.block is None:
             return
-        planned = {"all": 9, "aim": 7, "turns": 2}[self.checkup.focus]
+        planned = {"all": 13, "aim": 7, "updown": 4, "turns": 2}[self.checkup.focus]
         within = len(self.block.trials) / max(1, len(self.block.targets))
         self.progress.set(min(0.97, (self.done_blocks + within) / planned))
 

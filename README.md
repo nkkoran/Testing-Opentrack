@@ -159,11 +159,14 @@ not moved and head control doesn't need to be on. Choose what to practise:
   warm-up. A variation is only kept if it clearly beats the best so far, and the winner is
   measured once more at the end, so one lucky block can't decide. If most targets are missed, a
   much calmer setting is tried first. In Joystick mode the slowest speed is varied instead.
+- **Up & down** (about 1½ minutes): small targets straight up or down, to tune the up/down
+  sensitivity on its own, because looking up and down has less room than left and right.
+  Left & right stays as it is.
 - **Big turns** (about 1 minute): far targets; overshooting, slow approaches and so on suggest an
   adjustment, which is then tried and kept only if it's faster.
 - **Hold steady** (part of Everything and Small aiming): hold the crosshair still in a circle for 3
   seconds. If it wobbles, the wobble filter and steadiness go up a little.
-- **Everything** (about 4 minutes) does all three.
+- **Everything** (about 6 minutes) does all of these.
 
 Blocks follow each other after a short countdown, so no clicking is needed. At the end HeadMouse
 shows the scores before and after, exactly what would change, and what it tried. **Nothing is kept

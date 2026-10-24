@@ -37,8 +37,9 @@ STEADY_HOLDS = 2
 STEADY_SECONDS = 3.0
 WOBBLY = 0.35            # degrees RMS while holding still: more than this counts as shaky
 FOCUSES = {
-    "all": "Everything · 4 min",
+    "all": "Everything · 6 min",
     "aim": "Small aiming · 3 min",
+    "updown": "Up & down · 1½ min",
     "turns": "Big turns · 1 min",
 }
 
@@ -73,6 +74,11 @@ def precision_targets(rng, n=PRECISION_TARGETS):
         distance = rng.choice((5.0, 8.0, 11.0))
         out.append((round(distance * math.cos(angle), 2), round(distance * 0.6 * math.sin(angle), 2)))
     return out
+
+
+def vertical_targets(rng, n=PRECISION_TARGETS):
+    """Mostly up or down, a few degrees away, alternating."""
+    return [(round(rng.uniform(-1.5, 1.5), 2), (1 if i % 2 else -1) * rng.choice((3.0, 5.0, 7.0))) for i in range(n)]
 
 
 def turn_targets(rng, n=TURN_TARGETS):
@@ -136,12 +142,14 @@ def _clamp(v, lo, hi):
     return min(hi, max(lo, v))
 
 
-def scale_precision(settings, factor):
-    """Small-aiming responsiveness x factor, for each pair in its mode: the mouse-like
-    sensitivity, or (joystick) the slowest speed near the middle."""
+def scale_precision(settings, factor, axes=(0, 1)):
+    """Small-aiming responsiveness x factor, for each pair (0 = left/right, 1 = up/down) in its mode:
+    the mouse-like sensitivity, or (joystick) the slowest speed near the middle."""
     out = settings
     a = settings.assist
     for i, mode in enumerate(axis_modes(settings)):
+        if i not in axes:
+            continue
         if mode == "follow":
             out = _replace(out, "assist", vertical_follow_gain=round(_clamp(a.vertical_follow_gain * factor, 0.1, 10), 2))
         elif mode == "hybrid":
@@ -209,17 +217,56 @@ class Checkup:
 
     # --- the plan --------------------------------------------------------------
 
-    def _precision(self, settings, title, trying):
-        return Block("precision", title, settings, precision_targets(self.rng), radius=1.2, dwell=0.4,
+    def _precision(self, settings, title, trying, targets=None):
+        return Block("precision", title, settings, targets or precision_targets(self.rng), radius=1.2, dwell=0.4,
                      warmup=WARMUP, trying=trying)
 
     def _steps(self):
         if self.focus in ("all", "aim"):
             yield from self._precision_steps()
+        if self.focus in ("all", "updown"):
+            yield from self._vertical_steps()
         if self.focus in ("all", "turns"):
             yield from self._turn_steps()
         if self.focus in ("all", "aim"):
             yield from self._steady_steps()
+
+    def _compare(self, key, label, variations, targets):
+        """Measure the current best, then each variation (functions returning settings), keep one only
+        if it clearly scores better, and measure the winner once more. Scores go in self.scores[key]."""
+        start = self.best
+        total = len(variations) + 2
+        block = yield self._precision(start, f"{label} - 1 of {total}", "your settings", targets())
+        start_score = best_score = precision_score(block.scored)
+        best_block = block
+        if hit_rate(block.scored) < 0.5:   # mostly missed: try a much calmer setting first
+            variations = [lambda: scale_precision(start, 0.45, self._axes(key))] + list(variations)
+            total += 1
+        for i, make in enumerate(variations, start=2):
+            candidate = make()
+            if candidate == self.best:
+                continue
+            trying = changes(self.best, candidate)
+            block = yield self._precision(candidate, f"{label} - {i} of {total}", "; ".join(trying), targets())
+            score = precision_score(block.scored)
+            if score > best_score * MARGIN and hit_rate(block.scored) >= 0.5:
+                self.notes.append(f"{label}: {block.trying} - better (score {score:.2f} vs {best_score:.2f})")
+                self.best, best_score, best_block = candidate, score, block
+            else:
+                self.notes.append(f"{label}: tried {block.trying} - not better (score {score:.2f})")
+        if self.best != start:   # measure the winner again: one lucky block shouldn't decide
+            block = yield self._precision(self.best, f"{label} - {total} of {total} (check)", "the best one again",
+                                          targets())
+            confirmed = precision_score(best_block.scored + block.scored)
+            if confirmed < start_score * CONFIRM_MARGIN:
+                self.notes.append(f"{label}: the improvement didn't hold up when checked - kept the settings before")
+                self.best, confirmed = start, start_score
+            best_score = confirmed
+        self.scores[key] = (start_score, best_score)
+
+    @staticmethod
+    def _axes(key):
+        return (1,) if key == "updown" else (0, 1)
 
     def _precision_steps(self):
         """Your settings; then smaller and bigger sensitivity (both from yours); then slow-movement
@@ -229,34 +276,13 @@ class Checkup:
         if any(m in ("hybrid", "follow") for m in axis_modes(start)):
             on = start.assist.slow_precision_x >= 1.0
             variations.append(lambda: set_slow_precision(self.best, 0.5 if on else 1.0))
-        total = len(variations) + 2
-        block = yield self._precision(start, f"Small aiming - 1 of {total}", "your settings")
-        start_tp = best_tp = precision_score(block.scored)
-        best_block = block
-        if hit_rate(block.scored) < 0.5:   # mostly missed: try a much calmer setting first
-            variations.insert(0, lambda: scale_precision(start, 0.45))
-            total += 1
-        for i, make in enumerate(variations, start=2):
-            candidate = make()
-            if candidate == self.best:
-                continue
-            trying = changes(self.best, candidate)
-            block = yield self._precision(candidate, f"Small aiming - {i} of {total}", "; ".join(trying))
-            tp = precision_score(block.scored)
-            if tp > best_tp * MARGIN and hit_rate(block.scored) >= 0.5:
-                self.notes.append(f"Small aiming: {block.trying} - better (score {tp:.2f} vs {best_tp:.2f})")
-                self.best, best_tp, best_block = candidate, tp, block
-            else:
-                self.notes.append(f"Small aiming: tried {block.trying} - not better (score {tp:.2f})")
-        if self.best != start:   # measure the winner again: one lucky block shouldn't decide
-            block = yield self._precision(self.best, f"Small aiming - {total} of {total} (check)",
-                                          "the best one again")
-            confirmed = precision_score(best_block.scored + block.scored)
-            if confirmed < start_tp * CONFIRM_MARGIN:
-                self.notes.append("Small aiming: the improvement didn't hold up when checked - kept your settings")
-                self.best, confirmed = start, start_tp
-            best_tp = confirmed
-        self.scores["precision"] = (start_tp, best_tp)
+        yield from self._compare("precision", "Small aiming", variations, lambda: precision_targets(self.rng))
+
+    def _vertical_steps(self):
+        """Up & down on its own (it has less room than left & right): smaller and bigger up/down only."""
+        start = self.best
+        variations = [lambda: scale_precision(start, 0.7, (1,)), lambda: scale_precision(start, 1.4, (1,))]
+        yield from self._compare("updown", "Up & down", variations, lambda: vertical_targets(self.rng))
 
     def _turn_steps(self):
         targets = turn_targets(self.rng)

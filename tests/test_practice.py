@@ -73,6 +73,15 @@ class CheckupTests(unittest.TestCase):
         self.assertGreater(after, before)
         config.validate(c.best)
 
+    def test_up_and_down_on_its_own(self):
+        c = run(practice.Checkup(hybrid(hybrid_gain_x=2.0, hybrid_gain_y=7.0), focus="updown", seed=3),
+                belief=(2.0, 2.0))
+        self.assertEqual({b.kind for b in c.blocks}, {"precision"})
+        self.assertTrue(all(abs(y) > abs(x) for b in c.blocks for x, y in b.targets))
+        self.assertEqual(c.best.assist.hybrid_gain_x, 2.0)               # left/right untouched
+        self.assertLess(c.best.assist.hybrid_gain_y, 7.0, c.notes)
+        self.assertIn("updown", c.scores)
+
     def test_good_settings_are_kept(self):
         c = run(practice.Checkup(hybrid(), focus="aim", seed=2))
         before, after = c.scores["precision"]
