@@ -1435,6 +1435,11 @@ class SettingsWindow(Child):
                                   "your mouth to hold the right button while you aim, or tap a key to attack. "
                                   "Buttons are only pressed while head control is on and the game is in front.",
                      font=font(12), text_color=MUTED, wraplength=470, justify="left", anchor="w").pack(fill="x")
+        ctk.CTkLabel(scroll, text="Ideas for Enshrouded: attack = left button (a click, or held for a combo); "
+                                  "aim a bow or block = hold the right button (e.g. open mouth, or a toggle key so "
+                                  "you don't have to hold it); raise eyebrows = re-center.",
+                     font=font(11), text_color=MUTED, wraplength=470, justify="left", anchor="w").pack(fill="x",
+                                                                                                    pady=(6, 0))
         self.actions_switch = switch(scroll, "Use click actions", lambda: self._set(
             "actions", enabled=bool(self.actions_switch.get())), font=font(14, "bold"), text_color=TEXT)
         if a.enabled:
