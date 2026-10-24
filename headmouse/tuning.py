@@ -26,6 +26,8 @@ import random
 import statistics
 from dataclasses import dataclass, field
 
+from .config import axis_modes
+
 RADIUS = 2.5      # degrees: the crosshair counts as on the target within this
 DWELL = 0.35      # seconds the crosshair must stay on the target
 TIMEOUT = 8.0     # seconds before a target counts as missed
@@ -99,11 +101,8 @@ class Trial:
 
 
 def hybrid_axes(settings):
-    """Axes (0 = left/right, 1 = up/down) that use mouse-like aiming."""
-    a = settings.assist
-    if not a.hybrid:
-        return ()
-    return (0,) if a.vertical_follow else (0, 1)
+    """Axes (0 = left/right, 1 = up/down) that use mouse-like aiming near the middle."""
+    return tuple(i for i, mode in enumerate(axis_modes(settings)) if mode == "hybrid")
 
 
 def trial_metrics(trial, settings):
@@ -141,18 +140,24 @@ def score(trials, settings):
 
 
 def _propose_hybrid(settings, small, big_overshoot):
-    """Mouse-like aiming strength (per axis) and blend. Returns (assist settings, reasons)."""
+    """Mouse-like aiming strength and blend, per axis. big_overshoot: axes that overshot big turns.
+    Returns (assist settings, reasons)."""
     a = settings.assist
     changes, why = {}, []
     for axis in hybrid_axes(settings):
-        field, label = (("hybrid_gain_x", "left/right"), ("hybrid_gain_y", "up/down"))[axis]
+        field, blend_field, label = (("hybrid_gain_x", "hybrid_blend", "left/right"),
+                                     ("hybrid_gain_y", "hybrid_blend_y", "up/down"))[axis]
+        blend = getattr(a, blend_field)
+        if axis in big_overshoot and blend < 4.0:
+            changes[blend_field] = blend + 1.0
+            why.append(f"overshot bigger {label} turns - smoother hand-over from mouse-like to turning")
         ms = small[axis]
         old = getattr(a, field)
         if len(ms) < 2:
             continue
         mean = lambda key: statistics.fmean(m[key] for m in ms)
         # how far mouse-like aiming alone can turn the camera, vs how far the small targets were
-        short = any(old * (getattr(settings, m["direction"]).deadzone + a.hybrid_blend / 2) < m["distance"]
+        short = any(old * (getattr(settings, m["direction"]).deadzone + blend / 2) < m["distance"]
                     for m in ms)
         if mean("overshoot") > RADIUS + 0.5 or mean("exits") >= 0.8:
             gain, reason = max(0.5, old * 0.8), f"small {label} moves were jumpy - gentler mouse-like aiming"
@@ -165,9 +170,6 @@ def _propose_hybrid(settings, small, big_overshoot):
         if round(gain, 1) != old:          # already at the limit: nothing to try
             changes[field] = round(gain, 1)
             why.append(reason)
-    if big_overshoot and a.hybrid_blend < 4.0:
-        changes["hybrid_blend"] = a.hybrid_blend + 1.0
-        why.append("overshot bigger turns - smoother hand-over from mouse-like to turning")
     return dataclasses.replace(a, **changes), why
 
 
@@ -182,7 +184,7 @@ def propose(settings, trials):
         else:
             by_dir[m["direction"]].append(m)
     hybrid = hybrid_axes(settings)
-    big_overshoot_any = False
+    overshot = set()            # hybrid axes that overshot big turns
     g = settings.general
     groups = ([("right", "left")] if g.link_left_right else [("right",), ("left",)]) + \
              ([("up", "down")] if g.link_up_down else [("up",), ("down",)])
@@ -194,7 +196,7 @@ def propose(settings, trials):
         d = getattr(settings, name)
         if len(ms) < 2:
             continue
-        if name in ("up", "down") and settings.assist.vertical_follow:
+        if name in ("up", "down") and axis_modes(settings)[1] == "follow":
             for n in group:
                 notes[n] = ["follows your head (Settings > Feel) - not changed"]
             continue
@@ -208,8 +210,10 @@ def propose(settings, trials):
         why = []
         overshoot = mean("overshoot")
         big_overshoot = overshoot >= 6.0 or over_rate >= 0.5
-        mouse_area = DIRECTIONS.index(name) // 2 in hybrid   # the dead zone is the mouse-like area: leave it
-        big_overshoot_any |= big_overshoot and mouse_area
+        axis = DIRECTIONS.index(name) // 2
+        mouse_area = axis in hybrid   # the dead zone is the mouse-like area: leave it
+        if big_overshoot and mouse_area:
+            overshot.add(axis)
         if big_overshoot:
             # The worse the overshoot, the bigger the correction.
             if overshoot >= 20.0:
@@ -251,7 +255,7 @@ def propose(settings, trials):
                 max_speed=round(hi / 5) * 5, curve=round(curve, 2))})
             notes[n] = why
     if hybrid:
-        assist, why = _propose_hybrid(settings, small, big_overshoot_any)
+        assist, why = _propose_hybrid(settings, small, overshot)
         if why:
             new = dataclasses.replace(new, assist=assist)
             notes["aiming"] = why

@@ -104,9 +104,10 @@ stopped), short high tone = tracking back.
 
 **Settings** has four tabs. Changes are tried out immediately; **Save** keeps them and **Undo
 changes** goes back.
-- **Feel:** pick a direction (Right, Left, Up, Down) and adjust it while watching the graph.
-- **Tracking:** webcam or OpenTrack, camera choice, steadiness, the setup wizard, and the OpenTrack
-  profile helper.
+- **Feel:** choose **Left & right** or **Up & down**, how the head moves the camera there, and
+  the settings for that, while watching the graph.
+- **Tracking:** webcam or OpenTrack, camera choice, the setup wizard, and the OpenTrack profile
+  helper.
 - **Game:** calibration for the game, and auto-on in the game window. Head control is paused while
   this tab is open.
 - **Keys & sound:** click a key slot and press the new key (or tap the foot pedal). Also sound volume
@@ -139,8 +140,7 @@ green. The mouse is not moved and head control doesn't need to be on.
   reach the targets in each direction: overshooting, creeping up slowly, holding full tilt for a
   long time, or drifting off the target.
 - **Round 2** tries adjusted settings (small, bounded changes).
-- With **mouse-like aiming** switched on (see Precise aiming below), one target per direction is a
-  small move. Those tune the mouse-like sensitivity (gentler if small moves were jumpy, stronger
+- With **Mouse + joystick** chosen (see below), one target per direction is a small move. Those tune the mouse-like sensitivity (gentler if small moves were jumpy, stronger
   if you had to turn past the mouse-like area to reach them), and overshooting big turns widens the
   blend. The dead zones are left alone, because they set the size of the mouse-like area.
 - At the end it shows both times and exactly what changed. **Nothing is kept unless you press
@@ -166,70 +166,64 @@ Presets are small files in the `presets` folder next to the settings file, and u
 
 ### Adjusting by hand
 
-Open **Settings → Feel** and choose a direction. The graph shows camera speed against head angle,
-with a red dot where your head is right now.
+**Settings → Feel** shows one pair of directions at a time: **Left & right** or **Up & down**.
+Each pair has its own mode and its own settings, so up/down can stay exactly as it is while you
+change left/right. The graph shows both directions: camera speed against head angle, the middle
+area in green, and a red dot where your head is now.
 
-| Slider | Effect |
+**1. How your head moves the camera** (choose one for each pair):
+
+| Mode | What it does |
 |---|---|
-| Head turn for full speed | Smaller = less head movement needed |
-| Top speed | Fastest turning |
-| Dead zone | How far you can move before the camera starts turning |
-| Start delay | Wait this long before turning, in 0.01 s steps (0 = immediately; e.g. 0.2 s for down lets you glance without moving the camera) |
-| Slowest speed *(advanced)* | Speed just outside the dead zone |
-| Curve *(advanced)* | 1 = even; higher = finer control near center, faster further out |
+| **Joystick** | Turn past the dead zone and the camera keeps turning; further = faster. Back in the middle, it stops. (The original behaviour.) |
+| **Mouse + joystick** | Small head movements move the camera like a mouse: exactly as far as you move, and it stays there. Turn further than the mouse-like area and it keeps turning like a joystick. |
+| **Mouse only** *(up & down)* | The camera follows your head like a mouse all the way and never keeps turning by itself. Hold F9 to move your head back without moving the camera. |
 
-**Keep left and right the same** (or up and down, when Up/Down is chosen) makes the opposite
-direction match and follow every change, including in the setup wizard and the practice game.
-**Precision aim speed** sets how slow precision mode is.
+**2. Same settings for both sides.** When on, right and left (or up and down) share their
+settings and every change goes to both. When off, **Settings for Right / Left** chooses which side
+the sliders change.
 
-### Precise aiming: mouse-like for small moves (optional)
+**3. Only the settings the mode uses are shown:**
 
-Further down **Settings → Feel**. Switch on **Mouse-like for small moves, joystick for big
-turns**:
+| Section | Setting | What it does | Range |
+|---|---|---|---|
+| Mouse-like movement | Mouse-like area | How far your head can move before the joystick takes over (per side) | 0–20° |
+| | Sensitivity | Camera degrees per degree of head movement. Lower = more precise | 0.5–20× |
+| | Start delay | A movement from rest waits this long, then the camera catches up. A quick glance that comes back sooner is ignored | 0–1 s |
+| Joystick turning | Dead zone *(Joystick mode)* | How far you can move before turning starts (per side) | 0–20° |
+| | Blend from mouse-like *(Mouse + joystick)* | Over this many degrees past the mouse-like area, mouse-like movement fades out while turning fades in. 0 = sharp switch | 0–10° |
+| | Start delay | Wait this long before turning, so a quick glance past the edge doesn't turn | 0–2 s |
+| | Head turn for full speed | Smaller = less head turn needed for top speed | 3–60° |
+| | Top speed | Fastest turning | 10–720°/s |
+| | Slowest speed | Speed where turning starts | 0–120°/s |
+| | Curve | 1 = even; higher = gentler at first, faster further out | 0.5–6 |
+| Steadiness | Steadiness | Smooths tracking jitter for this pair. Left = steadier, right = quicker (less lag). Built-in webcam only | |
 
-- **Inside the dead zone** the camera follows your head like a mouse: it moves exactly as far as
-  your head does (times the sensitivity) and stays there when you stop. Very small, precise
-  aiming, and no drift.
-- **Further out** it spins like a joystick, exactly as before, so you can still turn all the
-  way around.
-- **Left/right sensitivity** and **Up/down sensitivity** (3× by default): camera degrees for
-  each degree of head movement. Lower is more precise.
-- **Blend into turning** (2° by default): over this many degrees past the dead zone the
-  mouse-like movement fades out while the joystick fades in. 0 is a sharp switch.
-- The **Dead zone** slider of each direction sets how big the mouse-like area is. Make it bigger
-  for more room. The graph shows the joystick part and the mouse-like sensitivity. While this is
-  on, the setup wizard and the practice game never make the dead zones smaller.
-- Coming back to the middle after a turn doesn't swing the camera back. Small moves follow
-  again once your head has stopped for a moment.
-- Hold the pause key (F9) to move your head without moving the camera, like lifting a mouse.
-- If **Up/down follows my head** is also on, up/down follows your head everywhere and this
-  applies to left/right only.
+The two **Start delay** settings are separate on purpose. The mouse-like one protects small
+aiming from glances; the joystick one stops quick glances past the edge from turning the camera.
 
-### Steadier control (optional)
+**Too smooth or slow to respond?** Try these one at a time: move **Steadiness** right, lower
+**Curve**, lower **Blend from mouse-like**, raise **Sensitivity**.
+**Too jumpy?** The other way round.
 
-Each helper is off until switched on, and they all work together with mouse-like aiming.
+**4. For all directions** (further down, each off until switched on):
 
-- **Stop when I come back to the middle.** After a turn, once the head is back near the middle
-  (even slightly past it), the camera stays still until the head clearly turns again: **Turn
-  again by** degrees (2.5° by default) away from where it came to rest. This stops the slow
-  drift that otherwise happens when you stop a little off center or overshoot center. It works
-  for up/down too. The first turn from rest is unchanged.
-- **Follow my posture.** While you rest in the dead zone, the middle slowly moves (over about
-  8 s) to where your head actually rests, so leaning or slouching doesn't need the re-center key.
-  It never adjusts while you're turning, never moves more than 6°, and the re-center key resets
-  it.
+- **Precision aim speed:** camera speed while the precision key (F7) is held.
+- **Stop when I come back to the middle (joystick).** After a joystick turn, once the head is back
+  near the middle (even slightly past it), the camera stays still until the head clearly turns
+  again: **Turn again by** degrees away from where it came to rest. Stops slow creeping.
+- **Follow my posture.** While you rest in the middle, the middle slowly moves (over about 8 s) to
+  where your head actually rests, so leaning or slouching doesn't need the re-center key. Never
+  while turning, never more than 6°, and the re-center key resets it.
 
-### Up and down
-
-Looking up and down has less room than left and right, because you still need to see the
-screen. If up/down is hard to control, switch on **Up/down follows my head (like a mouse)**. A
-small head tilt then tilts the camera several times as much (**Strength**, 4× by default), and
-the camera stays where you leave it, so you never have to hold your head tilted. Hold the pause
-key (F9) to move your head back without moving the camera, like lifting a mouse. Left/right
-still work like a joystick. The practice game leaves up/down alone in this mode.
+**Mouse + joystick details.** Coming back to the middle after a turn doesn't swing the camera
+back. Small movements follow again as soon as your head reaches the middle or stops for a moment.
+While this mode is on, the setup wizard and the practice game never make the mouse-like area
+smaller.
 
 Everything is stored in `headmouse_settings.toml` (with explanations). It can also be edited in
-Notepad, and changes apply within a second.
+Notepad, and changes apply within a second. Settings saved by earlier versions keep working
+unchanged.
 
 ### Glancing away (e.g. at the keyboard): optional
 
@@ -289,8 +283,8 @@ rested in the dead zone for 0.15 s.
 | "Webcam support is not installed" | Run the install line (or `Setup.bat`) again and watch for errors in step 2. |
 | "Camera 0 not found or busy" | Close OpenTrack, Zoom, Teams, etc. Wrong camera? Choose another in **Settings → Tracking**. |
 | "Looking for your face" stays red | Face the camera, put light on your face (not behind you), and move closer. |
-| Movement is jittery | **Settings → Tracking → Steadiness**: move it left. Or raise the dead zone. |
-| Movement feels laggy | Move Steadiness a little to the right. |
+| Movement is jittery | **Settings → Feel → Steadiness** (for that pair): move it left. Or raise the dead zone. |
+| Movement feels laggy or too smooth | Move Steadiness a little to the right; see "Too smooth or slow to respond?" above. |
 | Turns the wrong way | Run the **Setup wizard**; it fixes directions automatically. |
 | Camera moves when glancing at the keyboard | Switch on **Settings → Feel → Glancing away** and run the setup wizard, or set the Down **Start delay** to about 0.2 s. |
 | Settings changed or lost | **Settings → Keys & sound → Restore earlier settings** (scroll down). |

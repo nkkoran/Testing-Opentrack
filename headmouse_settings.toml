@@ -136,17 +136,28 @@ auto_center_limit = 6.0
 # like a joystick.
 vertical_follow = false
 vertical_follow_gain = 4.0
-# Mouse-like aiming for small moves: inside each direction's dead zone the
-# camera follows your head like a mouse (hybrid_gain_x / hybrid_gain_y camera
-# degrees per degree of head movement) and stays where you leave it. Turn
-# further and it works like a joystick as usual. Over hybrid_blend degrees past
-# the dead zone one fades into the other (0 = a sharp switch). The dead zone
-# sliders set how big the mouse-like area is. If vertical_follow is on, up/down
-# follows your head everywhere instead.
+# Mouse-like near the middle, joystick further out ("Mouse + joystick" in
+# Settings > Feel): inside each direction's dead zone the camera follows your
+# head like a mouse (hybrid_gain_x / hybrid_gain_y camera degrees per degree of
+# head movement) and stays where you leave it. Turn further and it works like a
+# joystick as usual. Over hybrid_blend (left/right) / hybrid_blend_y (up/down)
+# degrees past the dead zone one fades into the other (0 = a sharp switch). The
+# dead zone sets how big the mouse-like area is. hybrid_horizontal and
+# hybrid_vertical choose the directions it applies to. If vertical_follow is
+# on, up/down follows your head everywhere instead.
 hybrid = false
+hybrid_horizontal = true
+hybrid_vertical = true
 hybrid_gain_x = 3.0
 hybrid_gain_y = 3.0
 hybrid_blend = 2.0
+hybrid_blend_y = 2.0
+# Mouse-like start delay (seconds, both mouse-like modes): movement from rest
+# only moves the camera once it has lasted this long, then the camera catches
+# up. A quick glance that comes back sooner doesn't move the camera at all.
+# The joystick has its own start_delay for each direction.
+mouse_delay_x = 0.0
+mouse_delay_y = 0.0
 
 
 # -----------------------------------------------------------------------------
@@ -275,9 +286,12 @@ camera_index = 0
 frame_width = 640
 frame_height = 480
 fps = 30
-# Smoothing: lower min_cutoff = steadier but slower to react; higher beta =
-# less lag during fast head turns.
+# Smoothing ("Steadiness" in Settings > Feel): lower min_cutoff = steadier but
+# slower to react; higher beta = less lag during fast head turns.
+# smoothing_min_cutoff is for left/right, vertical_smoothing_min_cutoff for
+# up/down.
 smoothing_min_cutoff = 1.0
+vertical_smoothing_min_cutoff = 1.0
 smoothing_beta = 0.05
 # Head angles when looking straight at the screen. Set by the setup wizard
 # and by the re-center key.

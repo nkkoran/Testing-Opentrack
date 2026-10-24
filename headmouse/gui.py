@@ -657,10 +657,10 @@ class SettingsWindow(Child):
         super().__init__(main, "HeadMouse settings", "600x760")
         self.original = self.engine.settings
         self.work = self.engine.settings
+        self._touched = {}   # {section: {keys}} changed in this window, even if changed back
         self.dirty = False
         self._pending = None
         self._capturing = None
-        self.direction = "right"
 
         bar = ctk.CTkFrame(self.top, fg_color="transparent")
         bar.pack(side="bottom", fill="x", padx=18, pady=(6, 16))
@@ -690,11 +690,15 @@ class SettingsWindow(Child):
     # --- change handling -----------------------------------------------------
 
     def changes(self):
-        return config.diff(self.original, self.work)
+        """Every setting touched in this window, with its value now. Includes ones changed back to
+        where they started, so trying something and undoing it really undoes it."""
+        return {section: {key: getattr(getattr(self.work, section), key) for key in keys}
+                for section, keys in self._touched.items()}
 
     def _set(self, section, **values):
         self.work = replace(self.work, section, **values)
-        self.dirty = bool(self.changes())
+        self._touched.setdefault(section, set()).update(values)
+        self.dirty = bool(config.diff(self.original, self.work))
         self.saved_label.configure(text="You're trying out changes - press Save to keep them" if self.dirty else "")
         if self._pending:
             self.top.after_cancel(self._pending)
@@ -721,7 +725,8 @@ class SettingsWindow(Child):
     def discard(self):
         if self._pending:
             self.top.after_cancel(self._pending)
-        back = config.diff(self.work, self.original)
+        back = {section: {key: getattr(getattr(self.original, section), key) for key in keys}
+                for section, keys in self._touched.items()}
         self.engine.apply_settings(overlay(self.engine.settings, back), save=False)
         self.dirty = False
         return self._close_window()
@@ -746,10 +751,26 @@ class SettingsWindow(Child):
         self.engine.set_hold("calibration", game)  # the head must not turn the camera while calibrating
 
     # --- Feel ----------------------------------------------------------------
+    # One pair of directions at a time (left & right, or up & down). First how the head
+    # moves the camera there (the mode), then only the settings that mode uses, grouped
+    # as mouse-like movement and joystick turning. Each stored value appears in one place.
+
+    AXES = {"x": ("right", "left", "Left & right"), "y": ("up", "down", "Up & down")}
+    MODE_LABELS = {"joystick": "Joystick", "hybrid": "Mouse + joystick", "follow": "Mouse only"}
+    MODE_HELP = {
+        "joystick": "Turn your head past the dead zone and the camera keeps turning - further = faster. "
+                    "Come back to the middle and it stops.",
+        "hybrid": "Small head movements move the camera like a mouse: exactly as far as you move, and it "
+                  "stays there. Turn further than the mouse-like area and it keeps turning like a joystick.",
+        "follow": "The camera follows your head like a mouse, all the way - it never keeps turning by itself. "
+                  "Hold {pause} to move your head back without moving the camera.",
+    }
+    SIDE_FIELDS = ("deadzone", "start_delay", "full_speed_angle", "max_speed", "min_speed", "curve")
 
     def _feel_tab(self, tab):
         scroll = scroll_frame(tab)
         scroll.pack(fill="both", expand=True)
+        self.feel_scroll = scroll
         self.feel_top = ctk.CTkFrame(scroll, fg_color="transparent")
         self.feel_top.pack(fill="x", pady=(0, 12))
         primary_button(self.feel_top, "Find my best settings (practice game)", self.main.open_practice,
@@ -763,58 +784,115 @@ class SettingsWindow(Child):
         self.preset_menu = dropdown(row, [CUSTOM_PRESET], command=self._preset_chosen, height=34)
         self.preset_menu.pack(side="left", fill="x", expand=True, padx=(10, 0))
         self._show_presets()
-        ctk.CTkLabel(scroll, text="Which direction?", font=font(13), text_color=MUTED).pack(anchor="w")
-        self.dir_buttons = segmented(scroll, ["Right", "Left", "Up", "Down"], self._direction_selected)
-        self.dir_buttons.pack(fill="x", pady=(4, 10))
-        self.dir_buttons.set("Right")
-        graph_card = ctk.CTkFrame(scroll, fg_color=SUBTLE, corner_radius=14)
-        graph_card.pack(fill="x")
-        self.graph_scale = window_scaling(tab)
-        self.graph = tk.Canvas(graph_card, width=int(500 * self.graph_scale), height=int(150 * self.graph_scale),
-                               highlightthickness=0, bd=0)
-        self.graph.pack(padx=8, pady=8)
-        self.points_note = ctk.CTkFrame(scroll, fg_color="transparent")
-        ctk.CTkLabel(self.points_note, text="This direction uses a custom table from the settings file.",
-                     font=font(12), text_color=MUTED).pack(side="left")
-        small_button(self.points_note, "Use sliders", self._drop_points, width=110).pack(side="right")
+
+        self.axis, self.side = "x", "right"
+        self.axis_buttons = segmented(scroll, [v[2] for v in self.AXES.values()], self._axis_selected, height=42)
+        self.axis_buttons.pack(fill="x", pady=(2, 4))
+        self.axis_buttons.set(self.AXES["x"][2])
+        box = ctk.CTkFrame(scroll, fg_color="transparent")
+        box.pack(fill="x")
+        items = []   # (widget, shown when, pack options) - laid out by _load_axis
+        always = lambda: True
+        mode_of = lambda *modes: lambda: self._mode() in modes
+
+        def add(item, when=always, **pack):
+            """Lay out a widget (or a SliderRow's frame) when `when()` is true; returns the item."""
+            items.append((getattr(item, "frame", item), when, {"fill": "x", **pack}))
+            return item
+
+        def heading(text, sub):
+            frame = ctk.CTkFrame(box, fg_color="transparent")
+            ctk.CTkFrame(frame, height=1, fg_color=BORDER).pack(fill="x", pady=(18, 12))
+            ctk.CTkLabel(frame, text=text, font=font(16, "bold"), text_color=TEXT, anchor="w").pack(fill="x")
+            ctk.CTkLabel(frame, text=sub, font=font(11), text_color=MUTED, wraplength=470, justify="left",
+                         anchor="w").pack(fill="x")
+            return frame
+
+        def row(label, lo, hi, step, fmt, command, help_text):
+            return SliderRow(box, label, lo, hi, step, fmt, command, help_text)
 
         deg = lambda v: f"{v:.1f}°"
         speed = lambda v: f"{v:.0f}°/s"
-        self.rows = {
-            "full_speed_angle": SliderRow(scroll, "Head turn for full speed", 3, 45, 0.5, deg,
-                                          lambda v: self._dir_changed("full_speed_angle", v),
-                                          "Smaller = less head movement needed"),
-            "max_speed": SliderRow(scroll, "Top speed", 10, 360, 5, speed,
-                                   lambda v: self._dir_changed("max_speed", v), "Fastest camera turn"),
-            "deadzone": SliderRow(scroll, "Dead zone", 0, 10, 0.1, deg,
-                                  lambda v: self._dir_changed("deadzone", v),
-                                  "How far you can move before the camera starts turning"),
-            "start_delay": SliderRow(scroll, "Start delay", 0, 1.0, 0.01, lambda v: f"{v:.2f} s",
-                                     lambda v: self._dir_changed("start_delay", v),
-                                     "Wait this long before turning - lets you glance without moving"),
-            "min_speed": SliderRow(scroll, "Slowest speed", 0, 60, 0.5, speed,
-                                   lambda v: self._dir_changed("min_speed", v), "Speed just outside the dead zone"),
-            "curve": SliderRow(scroll, "Curve", 0.5, 4, 0.05, lambda v: f"{v:.2f}",
-                               lambda v: self._dir_changed("curve", v),
-                               "Higher = finer control near the middle, faster further out"),
-        }
-        for name in ("full_speed_angle", "max_speed", "deadzone", "start_delay"):
-            self.rows[name].frame.pack(fill="x", pady=(12, 0))
-        self.advanced = switch(scroll, "Show advanced", self._advanced, font=font(13), text_color=TEXT)
-        self.advanced.pack(anchor="w", pady=(14, 0))
-        self.adv_frame = ctk.CTkFrame(scroll, fg_color="transparent")
-        for name in ("min_speed", "curve"):
-            self.rows[name].frame.pack(in_=self.adv_frame, fill="x", pady=(10, 0))
-        self.link_switch = switch(scroll, "Keep left and right the same", self._link_toggled,
-                                  font=font(13, "bold"), text_color=TEXT)
-        self.link_switch.pack(anchor="w", pady=(14, 0))
-        ctk.CTkFrame(scroll, height=1, fg_color=BORDER).pack(fill="x", pady=16)
-        self.precision = SliderRow(scroll, "Precision aim speed", 5, 100, 5, lambda v: f"{v:.0f}%",
-                                   lambda v: self._set("motion", precision_speed_factor=round(v / 100, 2)),
-                                   "Camera speed while the precision key is held")
-        self.precision.frame.pack(fill="x")
-        self.precision.set(self.work.motion.precision_speed_factor * 100)
-        self._assist_section(scroll)
+        secs = lambda v: f"{v:.2f} s"
+        add(ctk.CTkLabel(box, text="How your head moves the camera", font=font(13, "bold"), text_color=TEXT,
+                         anchor="w"), pady=(8, 0))
+        self.mode_buttons = add(segmented(box, ["Joystick"], self._mode_selected), pady=(4, 0))
+        self.mode_help = add(ctk.CTkLabel(box, text="", font=font(12), text_color=MUTED, wraplength=470,
+                                          justify="left", anchor="w"), pady=(6, 8))
+        graph_card = add(ctk.CTkFrame(box, fg_color=SUBTLE, corner_radius=14))
+        self.graph_scale = window_scaling(tab)
+        self.graph = tk.Canvas(graph_card, width=int(500 * self.graph_scale), height=int(170 * self.graph_scale),
+                               highlightthickness=0, bd=0)
+        self.graph.pack(padx=8, pady=8)
+        self.points_note = add(ctk.CTkFrame(box, fg_color="transparent"),
+                               lambda: bool(getattr(self.work, self.side).points), pady=(8, 0))
+        ctk.CTkLabel(self.points_note, text="This direction uses a custom table from the settings file.",
+                     font=font(12), text_color=MUTED).pack(side="left")
+        small_button(self.points_note, "Use sliders", self._drop_points, width=110).pack(side="right")
+        not_follow = mode_of("joystick", "hybrid")
+        self.link_switch = add(switch(box, "Same settings for left and right", self._link_toggled,
+                                      font=font(13, "bold"), text_color=TEXT), not_follow, pady=(12, 0), anchor="w")
+        self.side_row = add(ctk.CTkFrame(box, fg_color="transparent"),
+                            lambda: not_follow() and not self._linked(), pady=(8, 0))
+        ctk.CTkLabel(self.side_row, text="Settings for", font=font(13), text_color=MUTED).pack(side="left")
+        self.side_buttons = segmented(self.side_row, ["Right", "Left"], self._side_selected, height=32)
+        self.side_buttons.pack(side="left", fill="x", expand=True, padx=(10, 0))
+
+        add(heading("Mouse-like movement", "For small, exact aiming: the camera moves as far as your head "
+                                           "does, times the sensitivity, and stays there."),
+            mode_of("hybrid", "follow"))
+        self.rows = {}   # per-direction settings (the side chosen above)
+        self.axis_rows = {}
+        self.rows["area"] = add(row("Mouse-like area", 0, 20, 0.5, deg, lambda v: self._dir_changed("deadzone", v),
+                                    "How far your head can move before the joystick takes over"),
+                                mode_of("hybrid"), pady=(10, 0))
+        self.axis_rows["gain"] = add(row("Sensitivity", 0.5, 20, 0.5, lambda v: f"{v:.1f}x", self._gain_changed,
+                                         "Camera turn for each degree of head movement - lower is more precise"),
+                                     mode_of("hybrid", "follow"), pady=(10, 0))
+        self.axis_rows["mouse_delay"] = add(
+            row("Start delay", 0, 1.0, 0.01, secs, lambda v: self._axis_changed("mouse_delay", round(v, 2)),
+                "Movement from rest waits this long; a quick glance that comes back sooner is ignored"),
+            mode_of("hybrid", "follow"), pady=(10, 0))
+
+        add(heading("Joystick turning", "For turning further: the camera keeps turning while your head is "
+                                        "turned - further = faster."), mode_of("joystick", "hybrid"))
+        side_rows = (
+            ("deadzone", "Dead zone", 0, 20, 0.1, deg, "How far you can move before the camera starts turning",
+             mode_of("joystick")),
+            ("blend", None, 0, 10, 0.5, deg, None, mode_of("hybrid")),
+            ("start_delay", "Start delay", 0, 2.0, 0.01, secs,
+             "Wait this long before turning - a quick glance past the edge doesn't turn", not_follow),
+            ("full_speed_angle", "Head turn for full speed", 3, 60, 0.5, deg,
+             "Smaller = less head turn needed for top speed", not_follow),
+            ("max_speed", "Top speed", 10, 720, 5, speed, "Fastest camera turn", not_follow),
+            ("min_speed", "Slowest speed", 0, 120, 0.5, speed, "Speed where turning starts", not_follow),
+            ("curve", "Curve", 0.5, 6, 0.05, lambda v: f"{v:.2f}",
+             "1 = even; higher = gentler at first, faster further out", not_follow),
+        )
+        for field, label, lo, hi, step, fmt, help_text, when in side_rows:
+            if field == "blend":
+                self.axis_rows["blend"] = add(
+                    row("Blend from mouse-like", lo, hi, step, fmt,
+                        lambda v: self._axis_changed("blend", round(v, 1)),
+                        "0 = sharp switch at the edge of the mouse-like area; more = smoother hand-over"),
+                    when, pady=(10, 0))
+                continue
+            self.rows[field] = add(row(label, lo, hi, step, fmt, lambda v, f=field: self._dir_changed(f, v),
+                                       help_text), when, pady=(10, 0))
+
+        add(heading("Steadiness", "Smooths out tracking jitter for these directions. Steadier means a "
+                                  "little more lag."))
+        self.axis_rows["steady"] = add(
+            row("Steadiness", 0.1, 8.0, 0.1,
+                lambda v: f"{'steady' if v < 0.8 else 'quick' if v > 2 else 'balanced'} {v:.1f}",
+                lambda v: self._axis_changed("steady", round(v, 2)),
+                "Left = steadier (less jitter), right = quicker (less lag)"), pady=(10, 0))
+        add(ctk.CTkLabel(box, text="Using OpenTrack: its own filter does the smoothing - set it in OpenTrack.",
+                         font=font(11), text_color=MUTED, anchor="w"),
+            lambda: self.work.tracking.source != "webcam", pady=(4, 0))
+        self._feel_items = items
+
+        self._helpers_section(scroll)
         ctk.CTkFrame(scroll, height=1, fg_color=BORDER).pack(fill="x", pady=16)
         ctk.CTkLabel(scroll, text="Glancing away", font=font(15, "bold"), text_color=TEXT).pack(anchor="w")
         ctk.CTkLabel(scroll, text="Keep the camera still when you look away from the screen, e.g. at the keyboard.",
@@ -847,7 +925,7 @@ class SettingsWindow(Child):
                                  "Times the head turn for full speed")
         self.far_row.frame.pack(fill="x", pady=(8, 0))
         self.far_row.set(g.look_away_factor)
-        self._load_direction()
+        self._load_axis()
 
     def _show_presets(self):
         current = config.matching_preset(self.engine.path, self.work)
@@ -866,7 +944,7 @@ class SettingsWindow(Child):
             return
         for section in config.PRESET_SECTIONS:
             self._set(section, **dataclasses.asdict(getattr(new, section)))
-        self._load_direction()
+        self._load_axis()
         self.precision.set(self.work.motion.precision_speed_factor * 100)
         self._show_presets()
         self.saved_label.configure(text=f'Trying "{name}" - press Save to keep it')
@@ -889,52 +967,29 @@ class SettingsWindow(Child):
             config.delete_preset(self.engine.path, name)
             self._show_presets()
 
-    def _assist_section(self, scroll):
+    def _helpers_section(self, scroll):
         a = self.work.assist
-        heading = lambda text, sub: (
-            ctk.CTkFrame(scroll, height=1, fg_color=BORDER).pack(fill="x", pady=16),
-            ctk.CTkLabel(scroll, text=text, font=font(15, "bold"), text_color=TEXT).pack(anchor="w"),
-            ctk.CTkLabel(scroll, text=sub, font=font(11), text_color=MUTED, wraplength=470,
-                         justify="left").pack(anchor="w"))
-        heading("Precise aiming", "Optional helpers - each one is off until you switch it on.")
-        self.hybrid_switch = switch(scroll, "Mouse-like for small moves, joystick for big turns", self._hybrid_toggled,
-                                    font=font(14, "bold"), text_color=TEXT)
-        if a.hybrid:
-            self.hybrid_switch.select()
-        self.hybrid_switch.pack(anchor="w", pady=(8, 0))
-        ctk.CTkLabel(scroll, text="Small head movements move the camera like a mouse - it goes exactly as far as you "
-                                  "move and stays there, for very precise aiming. Turn your head further and it "
-                                  "spins like a joystick, as now. The Dead zone (above) sets how big the mouse-like "
-                                  "area is in each direction - make it bigger for more room.",
-                     font=font(11), text_color=MUTED, wraplength=470, justify="left").pack(anchor="w")
-        self.hybrid_rows = {
-            "hybrid_gain_x": SliderRow(scroll, "Left/right sensitivity", 0.5, 12, 0.5, lambda v: f"{v:.1f}x",
-                                       lambda v: self._set("assist", hybrid_gain_x=round(v, 1)),
-                                       "Camera turn for each degree of head turn (lower = more precise)"),
-            "hybrid_gain_y": SliderRow(scroll, "Up/down sensitivity", 0.5, 12, 0.5, lambda v: f"{v:.1f}x",
-                                       lambda v: self._set("assist", hybrid_gain_y=round(v, 1)),
-                                       "Camera tilt for each degree of head tilt"),
-            "hybrid_blend": SliderRow(scroll, "Blend into turning", 0, 6, 0.5, lambda v: f"{v:.1f}°",
-                                      lambda v: self._set("assist", hybrid_blend=round(v, 1)),
-                                      "0 = sharp switch at the dead zone edge; more = smoother hand-over"),
-        }
-        for field, row in self.hybrid_rows.items():
-            row.frame.pack(fill="x", pady=(8, 0))
-            row.set(getattr(a, field))
-        ctk.CTkLabel(scroll, text="The practice game (top of this tab) can tune these for you.",
-                     font=font(11), text_color=MUTED, wraplength=470, justify="left").pack(anchor="w", pady=(6, 0))
-        heading("Steadier control", "Also optional, and they work together with the other helpers.")
-        self.return_switch = switch(scroll, "Stop when I come back to the middle", lambda: self._set(
+        ctk.CTkFrame(scroll, height=1, fg_color=BORDER).pack(fill="x", pady=(22, 12))
+        ctk.CTkLabel(scroll, text="For all directions", font=font(16, "bold"), text_color=TEXT).pack(anchor="w")
+        ctk.CTkLabel(scroll, text="Optional helpers - each one is off until you switch it on.", font=font(11),
+                     text_color=MUTED, wraplength=470, justify="left").pack(anchor="w")
+        self.precision = SliderRow(scroll, "Precision aim speed", 5, 100, 5, lambda v: f"{v:.0f}%",
+                                   lambda v: self._set("motion", precision_speed_factor=round(v / 100, 2)),
+                                   f"Camera speed while {self.work.keys.precision_hold or 'the precision key'} "
+                                   "is held")
+        self.precision.frame.pack(fill="x", pady=(10, 0))
+        self.precision.set(self.work.motion.precision_speed_factor * 100)
+        self.return_switch = switch(scroll, "Stop when I come back to the middle (joystick)", lambda: self._set(
             "assist", return_stop=bool(self.return_switch.get())), font=font(14, "bold"), text_color=TEXT)
         if a.return_stop:
             self.return_switch.select()
-        self.return_switch.pack(anchor="w", pady=(8, 0))
-        ctk.CTkLabel(scroll, text="After a turn, the camera stays still once your head is back near the middle "
-                                  "(even slightly past it) until you clearly turn again. No more slow creeping.",
+        self.return_switch.pack(anchor="w", pady=(14, 0))
+        ctk.CTkLabel(scroll, text="After a joystick turn, the camera stays still once your head is back near the "
+                                  "middle (even slightly past it) until you clearly turn again. No slow creeping.",
                      font=font(11), text_color=MUTED, wraplength=470, justify="left").pack(anchor="w")
-        self.release_row = SliderRow(scroll, "Turn again by", 1, 6, 0.5, lambda v: f"{v:.1f}°",
+        self.release_row = SliderRow(scroll, "Turn again by", 0.5, 10, 0.5, lambda v: f"{v:.1f}°",
                                      lambda v: self._set("assist", return_stop_release=round(v, 1)),
-                                     "How far you turn from where you rested to start moving again")
+                                     "How far you turn from where you rested to start turning again")
         self.release_row.frame.pack(fill="x", pady=(8, 0))
         self.release_row.set(a.return_stop_release)
         self.center_switch = switch(scroll, "Follow my posture (re-center slowly by itself)", lambda: self._set(
@@ -945,37 +1000,97 @@ class SettingsWindow(Child):
         ctk.CTkLabel(scroll, text="While you rest, the middle slowly moves to where your head actually is - if "
                                   "you lean or slouch you don't have to press re-center. Never while turning.",
                      font=font(11), text_color=MUTED, wraplength=470, justify="left").pack(anchor="w")
-        heading("Up and down", "Looking up and down has less room, because you still need to see the screen.")
-        self.follow_switch = switch(scroll, "Up/down follows my head (like a mouse)", self._follow_toggled,
-                                    font=font(14, "bold"), text_color=TEXT)
-        if a.vertical_follow:
-            self.follow_switch.select()
-        self.follow_switch.pack(anchor="w", pady=(8, 0))
-        ctk.CTkLabel(scroll, text=f"A small head tilt tilts the camera several times as much, and it stays where "
-                                  f"you leave it - no holding your head up. Hold {self.work.keys.pause_hold} to "
-                                  f"move your head without moving the camera. Left/right still work as now.",
-                     font=font(11), text_color=MUTED, wraplength=470, justify="left").pack(anchor="w")
-        self.gain_row = SliderRow(scroll, "Strength", 1, 12, 0.5, lambda v: f"{v:.1f}x",
-                                  lambda v: self._set("assist", vertical_follow_gain=round(v, 1)),
-                                  "Camera tilt for each degree of head tilt")
-        self.gain_row.frame.pack(fill="x", pady=(8, 0))
-        self.gain_row.set(a.vertical_follow_gain)
 
-    def _hybrid_toggled(self):
-        self._set("assist", hybrid=bool(self.hybrid_switch.get()))
+    # mode, axis and side --------------------------------------------------
 
-    def _follow_toggled(self):
-        self._set("assist", vertical_follow=bool(self.follow_switch.get()))
-        self._load_direction()
+    def _axis_index(self):
+        return 0 if self.axis == "x" else 1
+
+    def _mode(self):
+        return config.axis_modes(self.work)[self._axis_index()]
+
+    def _axis_selected(self, label):
+        self.axis = next(k for k, v in self.AXES.items() if v[2] == label)
+        self.side = self.AXES[self.axis][0]
+        self._load_axis()
+
+    def _side_selected(self, label):
+        self.side = label.lower()
+        self._load_axis()
+
+    def _mode_selected(self, label):
+        mode = next(k for k, v in self.MODE_LABELS.items() if v == label)
+        modes = list(config.axis_modes(self.work))
+        modes[self._axis_index()] = mode
+        self._set("assist", **config.mode_values(*modes))
+        self._load_axis()
 
     def _link_field(self):
-        return "link_left_right" if self.direction in ("right", "left") else "link_up_down"
+        return "link_left_right" if self.axis == "x" else "link_up_down"
+
+    def _linked(self):
+        return getattr(self.work.general, self._link_field())
 
     def _link_toggled(self):
         on = bool(self.link_switch.get())
         self._set("general", **{self._link_field(): on})
         if on:
+            self.side = self.AXES[self.axis][0]
             self._copy()
+        self._load_axis()
+
+    def _copy(self):
+        src = getattr(self.work, self.side)
+        self._set(PAIRS[self.side], **{f: getattr(src, f) for f in self.SIDE_FIELDS} | {"points": list(src.points)})
+        self.saved_label.configure(text=f"{PAIRS[self.side].title()} now matches {self.side} "
+                                        "and will follow its changes")
+
+    def _axis_field(self, name):
+        """(section, field) of a setting shared by both directions of the current axis."""
+        x = self.axis == "x"
+        if name == "gain":
+            if self._mode() == "follow":
+                return "assist", "vertical_follow_gain"
+            return "assist", "hybrid_gain_x" if x else "hybrid_gain_y"
+        return {"mouse_delay": ("assist", "mouse_delay_x" if x else "mouse_delay_y"),
+                "blend": ("assist", "hybrid_blend" if x else "hybrid_blend_y"),
+                "steady": ("webcam", "smoothing_min_cutoff" if x else "vertical_smoothing_min_cutoff")}[name]
+
+    def _axis_changed(self, name, value):
+        section, field = self._axis_field(name)
+        self._set(section, **{field: value})
+
+    def _gain_changed(self, value):
+        self._axis_changed("gain", round(value, 1))
+
+    def _load_axis(self):
+        """Show the settings the current axis and mode use, with their current values."""
+        pos, neg, _ = self.AXES[self.axis]
+        mode = self._mode()
+        modes = config.AXIS_MODES[self._axis_index()]
+        self.mode_buttons.configure(values=[self.MODE_LABELS[m] for m in modes])
+        self.mode_buttons.set(self.MODE_LABELS[mode])
+        self.mode_help.configure(text=self.MODE_HELP[mode].format(pause=self.work.keys.pause_hold or "pause"))
+        self.link_switch.configure(text=f"Same settings for {pos} and {neg}")
+        if self._linked():
+            self.link_switch.select()
+            self.side = pos
+        else:
+            self.link_switch.deselect()
+        self.side_buttons.configure(values=[pos.title(), neg.title()])
+        self.side_buttons.set(self.side.title())
+        d = getattr(self.work, self.side)
+        for name, row in self.rows.items():
+            row.set(getattr(d, "deadzone" if name == "area" else name))
+            row.enable(not d.points)
+        for name, row in self.axis_rows.items():
+            section, field = self._axis_field(name)
+            row.set(getattr(getattr(self.work, section), field))
+        for widget, _, _ in self._feel_items:
+            widget.pack_forget()
+        for widget, when, pack in self._feel_items:
+            if when():
+                widget.pack(**pack)
 
     def _glance_toggled(self):
         on = bool(self.glance_switch.get())
@@ -983,116 +1098,102 @@ class SettingsWindow(Child):
         if on:
             self.saved_label.configure(text="Tip: run the setup wizard (Tracking tab) so it learns your glances")
 
-    def _advanced(self):
-        if self.advanced.get():
-            self.adv_frame.pack(fill="x", after=self.advanced)
-        else:
-            self.adv_frame.pack_forget()
-
-    def _direction_selected(self, value):
-        self.direction = value.lower()
-        self._load_direction()
-
-    def _load_direction(self):
-        d = getattr(self.work, self.direction)
-        for name, row in self.rows.items():
-            row.set(getattr(d, name))
-        if d.points:
-            self.points_note.pack(fill="x", pady=(8, 0), after=self.graph.master)
-        else:
-            self.points_note.pack_forget()
-        pair = sorted((self.direction, PAIRS[self.direction]), key=DIRECTIONS.index)
-        self.link_switch.configure(text=f"Keep {pair[0]} and {pair[1]} the same")
-        if getattr(self.work.general, self._link_field()):
-            self.link_switch.select()
-        else:
-            self.link_switch.deselect()
-        follow = self.work.assist.vertical_follow and self.direction in ("up", "down")
-        for name, row in self.rows.items():
-            row.enable(not d.points and not follow)
-
-    def _linked(self):
-        return getattr(self.work.general, self._link_field())
-
     def _drop_points(self):
-        self._set(self.direction, points=[])
+        self._set(self.side, points=[])
         if self._linked():
-            self._set(PAIRS[self.direction], points=[])
-        self._load_direction()
+            self._set(PAIRS[self.side], points=[])
+        self._load_axis()
+
+    @staticmethod
+    def _consistent(d, values):
+        """`values` plus whatever else must change with them to keep direction `d` valid."""
+        new = dataclasses.replace(d, **values)
+        values = dict(values)
+        if new.full_speed_angle <= new.deadzone:
+            values["full_speed_angle"] = round(new.deadzone + 0.5, 3)
+        if new.min_speed > new.max_speed:
+            values["min_speed"] = new.max_speed
+        return values
 
     def _dir_changed(self, field, value):
-        d = getattr(self.work, self.direction)
-        values = {f: round(r.get(), 3) for f, r in self.rows.items()}
-        values[field] = round(value, 3)
-        if values["full_speed_angle"] <= values["deadzone"]:
-            values["full_speed_angle"] = values["deadzone"] + 0.5
-            self.rows["full_speed_angle"].set(values["full_speed_angle"])
-        if values["min_speed"] > values["max_speed"]:
-            values["min_speed"] = values["max_speed"]
-            self.rows["min_speed"].set(values["min_speed"])
+        """A per-direction slider moved: store it for the chosen side (and its pair when linked)."""
+        d = getattr(self.work, self.side)
         if d.points:
             return
-        self._set(self.direction, **values)
-        if self._linked():
-            self._set(PAIRS[self.direction], **values)
-
-    def _copy(self):
-        src = getattr(self.work, self.direction)
-        self._set(PAIRS[self.direction], **{f: getattr(src, f) for f in self.rows} | {"points": list(src.points)})
-        self.saved_label.configure(text=f"{PAIRS[self.direction].title()} now matches {self.direction} "
-                                        "and will follow its changes")
+        values = self._consistent(d, {field: round(value, 3)})
+        for name, v in values.items():   # deadzone is shown as "Mouse-like area" or "Dead zone"
+            for row in ([self.rows["area"]] if name == "deadzone" else []) + [self.rows[name]]:
+                if abs(row.get() - v) > 1e-6:
+                    row.set(v)
+        self._set(self.side, **values)
+        pair = getattr(self.work, PAIRS[self.side])
+        if self._linked() and not pair.points:   # only what changed, so other differences stay
+            self._set(PAIRS[self.side], **self._consistent(pair, values))
 
     def _plot(self, snap):
+        """Camera speed against head angle for both directions of the axis, with the mouse-like
+        area (or dead zone) in the middle and a red dot where the head is now."""
         c, k = self.graph, self.graph_scale
-        d = getattr(self.work, self.direction)
-        curve = DirectionCurve(d)
-        bg = pick(SUBTLE)
+        pos, neg, _ = self.AXES[self.axis]
+        mode = self._mode()
+        a = self.work.assist
+        bg, muted = pick(SUBTLE), pick(MUTED)
         c.delete("all")
         c.configure(bg=bg)
         w, h = int(c["width"]), int(c["height"])
-        x_max = max(20.0, (max(p[0] for p in d.points) if d.points else d.full_speed_angle) * 1.4)
-        y_top = max(10.0, max(curve.speed(i * x_max / 100) for i in range(101)))
-        left, bottom, top = 44 * k, h - 22 * k, 12 * k
-        px = lambda a: left + a / x_max * (w - left - 12 * k)
-        py = lambda v: bottom - v / (y_top * 1.1) * (bottom - top)
-        muted = pick(MUTED)
-        for a in range(0, int(x_max) + 1, 5):
-            c.create_text(px(a), bottom + 11 * k, text=f"{a}°", fill=muted, font=(FAMILY, 9))
-        for v in (0, y_top / 2, y_top):
-            c.create_line(left, py(v), w - 12 * k, py(v), fill=pick(BORDER))
-            c.create_text(left - 6 * k, py(v), text=f"{v:.0f}", anchor="e", fill=muted, font=(FAMILY, 9))
-        c.create_rectangle(left, top, px(d.deadzone), bottom, fill=pick(ZONE), outline="")
-        assist = self.work.assist
-        hybrid = assist.hybrid and not (assist.vertical_follow and self.direction in ("up", "down"))
-
-        def fade(a):  # mouse-like aiming: the joystick only fades in past the dead zone
-            if not hybrid:
-                return 1.0
-            if assist.hybrid_blend <= 0:
-                return float(a > d.deadzone)
-            return min(1.0, max(0.0, (a - d.deadzone) / assist.hybrid_blend))
-        pts = []
-        for i in range(161):
-            a = x_max * i / 160
-            pts += [px(a), py(curve.speed(a) * fade(a))]
-        c.create_line(*pts, fill=pick(ACCENT), width=3, smooth=True)
-        c.create_text(left + 6 * k, top, text="camera °/s", anchor="nw", fill=muted, font=(FAMILY, 9))
-        if hybrid:
-            gain = assist.hybrid_gain_x if self.direction in ("right", "left") else assist.hybrid_gain_y
-            c.create_text(left + 6 * k, top + 14 * k, text=f"mouse-like ×{gain:g}", anchor="nw",
-                          fill=pick(TEXT), font=(FAMILY, 9, "bold"))
-        if self.work.assist.vertical_follow and self.direction in ("up", "down"):
-            c.create_rectangle(0, 0, w, h, fill=bg, outline="")
-            c.create_text(w / 2, h / 2, text="Up/down follows your head like a mouse.\n"
-                                             "Set its strength under \"Up and down\" below.",
-                          fill=pick(TEXT), font=(FAMILY, 12), justify="center")
+        if mode == "follow":
+            c.create_text(w / 2, h / 2, text=f"Up/down follows your head like a mouse: "
+                                             f"{a.vertical_follow_gain:g}° of camera per degree of head tilt.\n"
+                                             "It never keeps turning by itself.",
+                          fill=pick(TEXT), font=(FAMILY, 11), justify="center", width=w - 30 * k)
             return
+        hybrid = mode == "hybrid"
+        blend = a.hybrid_blend if self.axis == "x" else a.hybrid_blend_y
+        dp, dn = getattr(self.work, pos), getattr(self.work, neg)
+        sides = ((1, DirectionCurve(dp), dp), (-1, DirectionCurve(dn), dn))
+
+        def speed(curve, d, angle):  # joystick speed (angle >= 0), faded in past the mouse-like area
+            s = curve.speed(angle)
+            if hybrid:
+                over = angle - d.deadzone
+                s *= 0.0 if over <= 0 else 1.0 if blend <= 0 or over >= blend else over / blend
+            return s
+
+        reach = max((max(p[0] for p in d.points) if d.points else d.full_speed_angle) for _, _, d in sides)
+        x_max = max(15.0, reach * 1.25)
+        y_top = max(10.0, max(speed(curve, d, x_max * i / 100) for _, curve, d in sides for i in range(101)))
+        top, bottom = 16 * k, h - 24 * k
+        half = w / 2 - 14 * k
+        px = lambda angle: w / 2 + angle / x_max * half
+        py = lambda v: bottom - v / (y_top * 1.1) * (bottom - top)
+        for v in (y_top / 2, y_top):
+            c.create_line(8 * k, py(v), w - 8 * k, py(v), fill=pick(BORDER))
+            c.create_text(10 * k, py(v) - 2 * k, text=f"{v:.0f}°/s", anchor="sw", fill=muted, font=(FAMILY, 8))
+        step = 10 if x_max > 30 else 5
+        for angle in range(-int(x_max // step) * step, int(x_max) + 1, step):
+            c.create_text(px(angle), bottom + 12 * k, text=f"{abs(angle)}°", fill=muted, font=(FAMILY, 8))
+        c.create_rectangle(px(-dn.deadzone), top, px(dp.deadzone), bottom, fill=pick(ZONE), outline="")
+        if hybrid:
+            gain = a.hybrid_gain_x if self.axis == "x" else a.hybrid_gain_y
+            c.create_text(w / 2, top + 2 * k, text=f"mouse-like ×{gain:g}", anchor="n", fill=pick(TEXT),
+                          font=(FAMILY, 9, "bold"))
+        else:
+            c.create_text(w / 2, top + 2 * k, text="dead zone", anchor="n", fill=muted, font=(FAMILY, 9))
+        for sign, curve, d in sides:
+            pts = []
+            for i in range(121):
+                angle = x_max * i / 120
+                pts += [px(sign * angle), py(speed(curve, d, angle))]
+            c.create_line(*pts, fill=pick(ACCENT), width=3)
+        c.create_text(14 * k, bottom - 4 * k, text=f"◀ {neg}", anchor="sw", fill=pick(TEXT), font=(FAMILY, 9, "bold"))
+        c.create_text(w - 14 * k, bottom - 4 * k, text=f"{pos} ▶", anchor="se", fill=pick(TEXT),
+                      font=(FAMILY, 9, "bold"))
         if snap.tracking == TrackingStatus.OK:
-            value = {"right": snap.yaw, "left": -snap.yaw, "up": snap.pitch, "down": -snap.pitch}[self.direction]
-            if value > 0:
-                a = min(value, x_max)
-                x, y, r = px(a), py(curve.speed(a) * fade(a)), 7 * k
-                c.create_oval(x - r, y - r, x + r, y + r, fill=pick(DANGER), outline=bg, width=2)
+            value = snap.yaw if self.axis == "x" else snap.pitch
+            sign, curve, d = sides[0] if value >= 0 else sides[1]
+            angle = min(abs(value), x_max)
+            x, y, r = px(sign * angle), py(speed(curve, d, angle)), 7 * k
+            c.create_oval(x - r, y - r, x + r, y + r, fill=pick(DANGER), outline=bg, width=2)
 
     # --- Tracking ------------------------------------------------------------
 
@@ -1118,12 +1219,9 @@ class SettingsWindow(Child):
                                command=lambda v: self._set("webcam", camera_index=int(v.split()[-1])))
         self.camera.set(f"Camera {self.work.webcam.camera_index}")
         self.camera.pack(side="right")
-        self.steady = SliderRow(cam, "Steadiness", 0.2, 4.0, 0.1,
-                                lambda v: "steady" if v < 0.8 else "quick" if v > 2 else "balanced",
-                                lambda v: self._set("webcam", smoothing_min_cutoff=round(v, 2)),
-                                "Left = steadier (less jitter), right = quicker (less lag)", chip=PILL)
-        self.steady.frame.pack(fill="x", padx=14, pady=(10, 14))
-        self.steady.set(self.work.webcam.smoothing_min_cutoff)
+        ctk.CTkLabel(cam, text="Steadiness (smoothing) is set separately for left/right and up/down on the "
+                               "Feel tab.", font=font(11), text_color=MUTED, wraplength=470, justify="left",
+                     anchor="w").pack(fill="x", padx=14, pady=(8, 14))
 
         ot = ctk.CTkFrame(scroll, fg_color=SUBTLE, corner_radius=14)
         ot.pack(fill="x", pady=(12, 0))
@@ -1808,7 +1906,7 @@ class PracticeWindow(Child):
 
     def start_round(self):
         self.round += 1
-        self.targets = tuning.make_targets(hybrid=self.original.assist.hybrid)
+        self.targets = tuning.make_targets(hybrid=bool(tuning.hybrid_axes(self.original)))
         self.trials = []
         self.trial = None
         self.next_at = time.monotonic() + 0.8
@@ -1873,7 +1971,8 @@ class PracticeWindow(Child):
             o, n = self.original.assist, self.proposal.assist
             changes = [f"{label} {getattr(o, f):g} → {getattr(n, f):g}"
                        for f, label in (("hybrid_gain_x", "left/right sensitivity"),
-                                        ("hybrid_gain_y", "up/down sensitivity"), ("hybrid_blend", "blend"))
+                                        ("hybrid_gain_y", "up/down sensitivity"),
+                                        ("hybrid_blend", "left/right blend"), ("hybrid_blend_y", "up/down blend"))
                        if getattr(o, f) != getattr(n, f)]
             lines.append(f"Mouse-like aiming: {'; '.join(self.notes['aiming'])}  ({', '.join(changes)})")
         self.heading.configure(text="The new settings worked better" if better else "Your old settings did better")

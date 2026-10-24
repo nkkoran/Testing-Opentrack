@@ -105,7 +105,8 @@ class WebcamSource:
         self.packets = 0
         self.face_visible = False
         self._yaw_filter = OneEuroFilter(webcam_settings.smoothing_min_cutoff, webcam_settings.smoothing_beta)
-        self._pitch_filter = OneEuroFilter(webcam_settings.smoothing_min_cutoff, webcam_settings.smoothing_beta)
+        self._pitch_filter = OneEuroFilter(webcam_settings.vertical_smoothing_min_cutoff,
+                                           webcam_settings.smoothing_beta)
 
     def describe(self):
         return f"webcam {self.s.camera_index} (built-in tracking)"
@@ -113,8 +114,9 @@ class WebcamSource:
     def update_settings(self, webcam_settings):
         """Apply smoothing changes without reopening the camera."""
         self.s = webcam_settings
-        for f in (self._yaw_filter, self._pitch_filter):
-            f.min_cutoff = webcam_settings.smoothing_min_cutoff
+        for f, cutoff in ((self._yaw_filter, webcam_settings.smoothing_min_cutoff),
+                          (self._pitch_filter, webcam_settings.vertical_smoothing_min_cutoff)):
+            f.min_cutoff = cutoff
             f.beta = webcam_settings.smoothing_beta
 
     def start(self):

@@ -31,7 +31,8 @@ class WebcamSettings:
     frame_width: int = 640
     frame_height: int = 480
     fps: int = 30
-    smoothing_min_cutoff: float = 1.0
+    smoothing_min_cutoff: float = 1.0           # steadiness, left/right (Hz: lower = steadier, laggier)
+    vertical_smoothing_min_cutoff: float = 1.0  # steadiness, up/down (missing = same as left/right)
     smoothing_beta: float = 0.05
     neutral_yaw: float = 0.0
     neutral_pitch: float = 0.0
@@ -158,10 +159,15 @@ class AssistSettings:
     auto_center_limit: float = 6.0    # never shift the center more than this (degrees)
     vertical_follow: bool = False     # up/down follows the head like a mouse
     vertical_follow_gain: float = 4.0
-    hybrid: bool = False              # mouse-like inside the dead zone, joystick beyond it
+    hybrid: bool = False              # mouse-like inside the dead zone, joystick beyond it...
+    hybrid_horizontal: bool = True    # ...for left/right
+    hybrid_vertical: bool = True      # ...for up/down (unless vertical_follow)
     hybrid_gain_x: float = 3.0        # camera degrees per head degree, left/right
     hybrid_gain_y: float = 3.0        # camera degrees per head degree, up/down
-    hybrid_blend: float = 2.0         # degrees past the dead zone over which mouse fades into joystick
+    hybrid_blend: float = 2.0         # left/right: degrees past the dead zone over which mouse fades into joystick
+    hybrid_blend_y: float = 2.0       # up/down (missing = same as left/right)
+    mouse_delay_x: float = 0.0        # mouse-like movement from rest waits this long (s); a quick glance is ignored
+    mouse_delay_y: float = 0.0
 
 
 @dataclass
@@ -222,11 +228,44 @@ def _convert(section, name, value, default):
     raise SettingsError(f"{where}: unsupported setting type")
 
 
+# Settings added as an up/down copy of an existing one. A file without the new key
+# (saved by an older version) keeps using the old key's value for it.
+INHERITED = (("webcam", "vertical_smoothing_min_cutoff", "smoothing_min_cutoff"),
+             ("assist", "hybrid_blend_y", "hybrid_blend"))
+
+AXIS_MODES = (("joystick", "hybrid"), ("joystick", "hybrid", "follow"))
+
+
+def axis_modes(settings):
+    """How the head moves the camera: (left/right, up/down), each "joystick", "hybrid"
+    (mouse-like near the middle, joystick further out) or, up/down only, "follow" (mouse-like)."""
+    a = settings.assist
+    x = "hybrid" if a.hybrid and a.hybrid_horizontal else "joystick"
+    y = "follow" if a.vertical_follow else "hybrid" if a.hybrid and a.hybrid_vertical else "joystick"
+    return x, y
+
+
+def mode_values(x, y):
+    """[assist] values that give these axis modes."""
+    return {"hybrid": x == "hybrid" or y == "hybrid", "hybrid_horizontal": x == "hybrid",
+            "hybrid_vertical": y == "hybrid", "vertical_follow": y == "follow"}
+
+
+def _inherit(data):
+    """Fill in up/down copies missing from an older file (see INHERITED)."""
+    for section, new, old in INHERITED:
+        values = data.get(section)
+        if isinstance(values, dict) and old in values and new not in values:
+            data = {**data, section: {**values, new: values[old]}}
+    return data
+
+
 def from_dict(data):
     """Build Settings from a parsed TOML dict. Returns (settings, warnings)."""
     settings = Settings()
     warnings = []
     sections = {f.name for f in dataclasses.fields(Settings)}
+    data = _inherit(data)
     for section_name, values in data.items():
         if section_name not in sections:
             warnings.append(f"unknown section [{section_name}] ignored")
@@ -279,7 +318,8 @@ def validate(s):
     _check(s.webcam.camera_index >= 0, "[webcam] camera_index must be 0 or more")
     _check(s.webcam.frame_width > 0 and s.webcam.frame_height > 0 and s.webcam.fps > 0,
            "[webcam] frame_width, frame_height and fps must be more than 0")
-    _check(s.webcam.smoothing_min_cutoff > 0, "[webcam] smoothing_min_cutoff must be more than 0")
+    _check(s.webcam.smoothing_min_cutoff > 0 and s.webcam.vertical_smoothing_min_cutoff > 0,
+           "[webcam] smoothing_min_cutoff and vertical_smoothing_min_cutoff must be more than 0")
     _check(s.webcam.smoothing_beta >= 0, "[webcam] smoothing_beta must be 0 or more")
     _check(0 < s.opentrack.port < 65536, "[opentrack] port must be between 1 and 65535")
     _check(0 <= s.sounds.volume <= 1, "[sounds] volume must be between 0 and 1")
@@ -322,7 +362,10 @@ def validate(s):
     _check(0.5 <= a.vertical_follow_gain <= 20, "[assist] vertical_follow_gain must be 0.5-20")
     _check(0.5 <= a.hybrid_gain_x <= 20 and 0.5 <= a.hybrid_gain_y <= 20,
            "[assist] hybrid_gain_x and hybrid_gain_y must be 0.5-20")
-    _check(0 <= a.hybrid_blend <= 10, "[assist] hybrid_blend must be 0-10 degrees")
+    _check(0 <= a.hybrid_blend <= 10 and 0 <= a.hybrid_blend_y <= 10,
+           "[assist] hybrid_blend and hybrid_blend_y must be 0-10 degrees")
+    _check(0 <= a.mouse_delay_x <= 2 and 0 <= a.mouse_delay_y <= 2,
+           "[assist] mouse_delay_x and mouse_delay_y must be 0-2 seconds")
 
 
 def load(path):
@@ -579,6 +622,17 @@ def save_values(path, updates):
     """
     path = Path(path)
     text = path.read_text(encoding="utf-8") if path.exists() else ""
+    try:
+        before = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        before = {}
+    updates = {sec: dict(vals) for sec, vals in updates.items()}
+    for section, new, old in INHERITED:
+        # The file relies on the old key for the new one: write it down before the old key changes.
+        values = before.get(section)
+        if isinstance(values, dict) and old in values and new not in values \
+                and old in updates.get(section, {}) and new not in updates[section]:
+            updates[section][new] = values[old]
     new_text = update_text(text, updates)
     from_dict(tomllib.loads(new_text))  # never write a file that would not load
     if new_text != text:

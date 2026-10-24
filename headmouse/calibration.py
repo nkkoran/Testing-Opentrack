@@ -18,6 +18,8 @@ import dataclasses
 import statistics
 from dataclasses import dataclass
 
+from .config import axis_modes
+
 DIRECTIONS = (("right", 0, +1), ("left", 0, -1), ("up", 1, +1), ("down", 1, -1))
 MIN_RANGE = 3.0           # degrees; less than this means the movement wasn't seen
 FULL_SPEED_SHARE = 0.75
@@ -108,7 +110,7 @@ def propose(settings, source_kind, neutral, movements):
         full = min(45.0, max(5.0, round(FULL_SPEED_SHARE * m.extent, 1)))
         dead = max(DEADZONE_SHARE * full, 4 * noise, 1.0)
         dead = round(min(dead, full - 2.0), 1)
-        if settings.assist.hybrid and not (axis == 1 and settings.assist.vertical_follow) and dead < d.deadzone:
+        if axis_modes(settings)[axis] == "hybrid" and dead < d.deadzone:
             dead = d.deadzone                       # keep the mouse-like area
             full = max(full, round(dead + 2.0, 1))
         new = dataclasses.replace(new, **{name: dataclasses.replace(d, deadzone=dead, full_speed_angle=full)})

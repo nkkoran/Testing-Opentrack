@@ -7,12 +7,15 @@ MotionController.step() is one tick of the output loop.
 import math
 from dataclasses import dataclass
 
+from .config import axis_modes
 from .curves import DirectionCurve
 from .glance import GlanceGuard
 
 FOLLOW_BACKLASH = 0.25   # degrees: head jitter smaller than this doesn't move the camera (vertical follow)
 STEADY_SPEED = 10.0      # degrees/second: auto-center only learns while the head is this still
 SETTLE_TIME = 0.2        # seconds: hybrid follows again after a turn once the head has been still this long
+TURN_TRAVEL = 0.2        # camera degrees: once the joystick has turned this much, coming back won't swing back
+CATCH_UP = 0.1           # seconds: after the mouse-like start delay, the camera catches up about this fast
 
 
 def orient(raw, settings, offset=(0.0, 0.0)):
@@ -164,7 +167,8 @@ class MotionController:
                                    a.return_stop, a.return_stop_release, a.hybrid_blend)
         self.pitch_axis = AxisMotion(DirectionCurve(settings.up), DirectionCurve(settings.down),
                                      m.deadzone_hysteresis, m.reverse_delay_seconds,
-                                     a.return_stop, a.return_stop_release, a.hybrid_blend)
+                                     a.return_stop, a.return_stop_release, a.hybrid_blend_y)
+        self.modes = axis_modes(settings)
         self.counts_per_degree_x = settings.mouse.counts_per_360 / 360.0
         self.counts_per_degree_y = self.counts_per_degree_x * settings.mouse.vertical_scale
         self.glance = GlanceGuard(settings)
@@ -176,7 +180,14 @@ class MotionController:
         self._previous = None          # last corrected angles, to tell resting from moving
         self._follow_ref = [None, None]  # follow modes: head angle the camera last followed (yaw, pitch)
         self._turned = [0, 0]          # hybrid: direction of the last joystick turn, until the head settles
+        self._travel = [0.0, 0.0]      # hybrid: camera degrees the joystick has turned in this turn
         self._still = [0.0, 0.0]       # hybrid: how long the head has been still (within the jitter filter)
+        self._held = [None, None]      # mouse delay: camera movement waiting out the delay (None = not waiting)
+        self._held_time = [0.0, 0.0]
+        self._held_peak = [0.0, 0.0]   # mouse delay: furthest the held movement got from where it started
+        self._catch_up = [0.0, 0.0]    # mouse delay: released movement still to send
+        self._active = [False, False]  # mouse delay: moving already (no delay until the head rests again)
+        self._rest = [0.0, 0.0]        # mouse delay: how long the mouse-like movement has been still
 
     def _stop(self, result):
         """Stop all movement and throw away leftover fractions of a count."""
@@ -199,7 +210,14 @@ class MotionController:
         """Forget where the head was, so the next tick can't jump (after pause, re-center...)."""
         self._follow_ref = [None, None]
         self._turned = [0, 0]
+        self._travel = [0.0, 0.0]
         self._still = [0.0, 0.0]
+        self._held = [None, None]
+        self._held_time = [0.0, 0.0]
+        self._held_peak = [0.0, 0.0]
+        self._catch_up = [0.0, 0.0]
+        self._active = [False, False]
+        self._rest = [0.0, 0.0]
 
     def step(self, angles, dt, hold=False, precision=False, eye_pitch=None, blink=0.0):
         """Advance one tick.
@@ -238,14 +256,15 @@ class MotionController:
                 return result
 
         a = self.s.assist
-        follow = a.vertical_follow
-        if a.hybrid:
+        x_mode, y_mode = self.modes
+        follow = y_mode == "follow"
+        if x_mode == "hybrid":
             yaw_speed = self._hybrid(0, yaw, dt, a.hybrid_gain_x, self.yaw_axis)
         else:
             yaw_speed = self.yaw_axis.speed(yaw, dt)
         if follow:
             pitch_speed = self._follow(1, pitch, dt, a.vertical_follow_gain)
-        elif a.hybrid:
+        elif y_mode == "hybrid":
             pitch_speed = self._hybrid(1, pitch, dt, a.hybrid_gain_y, self.pitch_axis)
         else:
             pitch_speed = self.pitch_axis.speed(pitch, dt)
@@ -276,23 +295,62 @@ class MotionController:
         new = min(max(ref, angle - FOLLOW_BACKLASH), angle + FOLLOW_BACKLASH)  # ignores tiny jitter
         self._follow_ref[i] = new
         if axis is None:
-            return (new - ref) * gain / dt
-        if self._turned[i] and (new - ref) * self._turned[i] < 0:
-            return 0.0  # heading back after a turn: don't swing the camera back
-        return (axis.follow_position(new) - axis.follow_position(ref)) * gain / dt
+            moved = (new - ref) * gain
+        elif self._turned[i] and (new - ref) * self._turned[i] < 0:
+            moved = 0.0  # heading back after a turn: don't swing the camera back
+        else:
+            moved = (axis.follow_position(new) - axis.follow_position(ref)) * gain
+        return self._delayed(i, moved, dt) / dt
+
+    def _delayed(self, i, moved, dt):
+        """Mouse-like start delay. Movement from rest is held until it has lasted the delay,
+        then released over CATCH_UP; if the head went away and came back most of the way
+        (a glance), it is dropped. Returns camera degrees to turn this tick."""
+        delay = (self.s.assist.mouse_delay_x, self.s.assist.mouse_delay_y)[i]
+        if delay <= 0:
+            return moved
+        out = 0.0
+        if self._held[i] is None and not self._active[i] and moved:
+            self._held[i], self._held_time[i], self._held_peak[i] = 0.0, 0.0, 0.0  # moving from rest: wait
+        if self._held[i] is not None:
+            self._held[i] += moved
+            self._held_time[i] += dt
+            self._held_peak[i] = max(self._held_peak[i], abs(self._held[i]))
+            if self._held_time[i] >= delay:
+                if abs(self._held[i]) >= 0.5 * self._held_peak[i]:   # still away: a real move
+                    self._catch_up[i] += self._held[i]
+                    self._active[i] = True
+                self._held[i] = None
+        else:
+            out = moved
+        if self._active[i]:
+            self._rest[i] = self._rest[i] + dt if moved == 0 else 0.0
+            if self._rest[i] >= SETTLE_TIME and not self._catch_up[i]:
+                self._active[i] = False                   # resting again: the next move waits
+        if self._catch_up[i]:
+            step = self._catch_up[i] * min(1.0, dt / CATCH_UP)
+            if abs(self._catch_up[i] - step) < 0.01:
+                step = self._catch_up[i]
+            self._catch_up[i] -= step
+            out += step
+        return out
 
     def _hybrid(self, i, angle, dt, gain, axis):
         """Mouse-like inside the dead zone, joystick beyond it, blended in between."""
         stick = axis.speed(angle, dt) * (1.0 - axis.weight(angle))
         if axis.direction:
-            self._turned[i] = axis.direction
+            self._travel[i] += abs(stick) * dt
+            if self._travel[i] >= TURN_TRAVEL:
+                self._turned[i] = axis.direction          # a real turn, not a nudge past the edge
+        else:
+            self._travel[i] = 0.0
         before = self._follow_ref[i]
         follow = self._follow(i, angle, dt, gain, axis)
         # still = jitter too small to move the follower (the same filter that keeps the camera still)
         self._still[i] = self._still[i] + dt if self._follow_ref[i] == before else 0.0
-        if self._turned[i] and not axis.direction and axis.stopped_time >= axis.reverse_delay \
-                and self._still[i] >= SETTLE_TIME:
-            self._turned[i] = 0  # the turn is over: small movements follow again
+        settled = not axis.direction and axis.stopped_time >= axis.reverse_delay and self._still[i] >= SETTLE_TIME
+        if self._turned[i] and (settled or angle * self._turned[i] <= 0):
+            self._turned[i] = 0  # the turn is over (or the head is back in the middle): small moves follow again
         return stick + follow
 
     def _learn_center(self, yaw, pitch, yaw_speed, pitch_speed, dt, skip_pitch):
