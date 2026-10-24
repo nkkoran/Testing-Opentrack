@@ -733,7 +733,7 @@ class SettingsWindow(Child):
 
     def close(self):
         if not self.dirty:
-            return self._close_window()
+            return self.discard()   # also undoes anything tried and changed back, and pending live updates
         answer = messagebox.askyesnocancel("HeadMouse", "Save your changes?", parent=self.top)
         if answer is None:
             return False
@@ -812,7 +812,7 @@ class SettingsWindow(Child):
             return SliderRow(box, label, lo, hi, step, fmt, command, help_text)
 
         deg = lambda v: f"{v:.1f}°"
-        speed = lambda v: f"{v:.0f}°/s"
+        speed = lambda v: f"{round(v, 1):g}°/s"
         secs = lambda v: f"{v:.2f} s"
         add(ctk.CTkLabel(box, text="How your head moves the camera", font=font(13, "bold"), text_color=TEXT,
                          anchor="w"), pady=(8, 0))
@@ -880,13 +880,14 @@ class SettingsWindow(Child):
             self.rows[field] = add(row(label, lo, hi, step, fmt, lambda v, f=field: self._dir_changed(f, v),
                                        help_text), when, pady=(10, 0))
 
+        webcam = lambda: self.work.tracking.source == "webcam"
         add(heading("Steadiness", "Smooths out tracking jitter for these directions. Steadier means a "
                                   "little more lag."))
         self.axis_rows["steady"] = add(
             row("Steadiness", 0.1, 8.0, 0.1,
                 lambda v: f"{'steady' if v < 0.8 else 'quick' if v > 2 else 'balanced'} {v:.1f}",
                 lambda v: self._axis_changed("steady", round(v, 2)),
-                "Left = steadier (less jitter), right = quicker (less lag)"), pady=(10, 0))
+                "Left = steadier (less jitter), right = quicker (less lag)"), webcam, pady=(10, 0))
         add(ctk.CTkLabel(box, text="Using OpenTrack: its own filter does the smoothing - set it in OpenTrack.",
                          font=font(11), text_color=MUTED, anchor="w"),
             lambda: self.work.tracking.source != "webcam", pady=(4, 0))
