@@ -21,6 +21,27 @@ It reads your **webcam directly** (built-in face tracking, no other program need
 > self-check, and installing, updating and uninstalling. Live webcam use and mouse movement inside
 > Enshrouded can only be tested on the real PC (section 3).
 
+### New in 1.7 - 1.10, and what to try first
+
+Everything new is **off until you switch it on**, and settings saved by earlier versions keep working
+exactly as before. In this order:
+
+1. **Quick fixes** (main window): tap what feels wrong ("small aiming is jumpy", "keeps moving after
+   I stop"...) and HeadMouse adjusts it; Undo is one tap.
+2. **Getting started** (main window): the checklist of setup steps, with buttons that go there.
+3. **Settings → Situations → While you aim → Make suggested**: a slow, exact feel while the aim
+   button is held. In Enshrouded the right mouse button also blocks, so Q (ready ranged weapon) or
+   a toggle key may suit better.
+4. **Find my best settings → Small aiming** or **Up & down**: the new practice check-up tries a few
+   variations and keeps only what clearly works better.
+5. **Settings → Clicks** (last): mouse buttons from a key, a foot pedal or a face gesture. Use
+   **Measure my gestures** to set the gestures up.
+
+Not yet tried in the real game or with a real face, so check these: whether Enshrouded shows the
+Windows mouse pointer in menus (the Situations tab shows it live), whether a held right button
+from a gesture also counts as the aim key, how well the gestures work for your face, and the
+check-up with a real head.
+
 ---
 
 ## 1. Install
