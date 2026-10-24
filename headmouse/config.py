@@ -732,6 +732,13 @@ def save_values(path, updates):
     tmp.replace(path)
 
 
+def overlay(base, changes):
+    """`base` with {section: {key: value}} applied on top."""
+    for section, values in changes.items():
+        base = dataclasses.replace(base, **{section: dataclasses.replace(getattr(base, section), **values)})
+    return base
+
+
 def diff(old, new):
     """{section: {key: value}} for every setting that differs between two Settings."""
     out = {}

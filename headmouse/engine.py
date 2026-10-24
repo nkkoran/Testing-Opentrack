@@ -7,7 +7,6 @@ threads are queued and executed on the engine thread.
 """
 
 import collections
-import dataclasses
 import logging
 import queue
 import sys
@@ -89,6 +88,7 @@ class HeadMouse:
         self.action_precision = False         # precision aim / freeze switched on by an action
         self.action_freeze = False
         self.gesture_steady = False           # a gesture is starting or ending: camera held still
+        self.buttons_off_until = 0.0          # no mouse buttons until then (set after an error)
         self._pointer = False       # the game shows a mouse pointer (steady for POINTER_STABLE_SECONDS)
         self._pointer_seen, self._pointer_since = False, 0.0
         self.settings = None
@@ -113,7 +113,13 @@ class HeadMouse:
             self.controller.drift = list(old.drift)  # keep what auto-center has learned
         self._situation_keys = {name: key_code(getattr(settings.situations, f"{name}_key"))
                                 for name in SITUATIONS}
-        self._bindings = actions.bindings(settings)
+        bindings = actions.bindings(settings)
+        if bindings != getattr(self, "_bindings", None):
+            self.actions.reset()                     # a toggled button may not be bound any more
+            bound = {action for _, action in bindings}
+            self.action_freeze = self.action_freeze and "freeze" in bound
+            self.action_precision = self.action_precision and "precision" in bound
+        self._bindings = bindings
         self._action_keys = {source: key_code(source[4:]) for source, _ in self._bindings if source.startswith("key:")}
         self.monitor = TrackingMonitor(settings.safety)
         self.vk = {name: settings.key(name) for name in KEY_NAMES}
@@ -148,6 +154,8 @@ class HeadMouse:
         for gesture in self.gestures.update(face, now, dt, actions.thresholds(self.settings), a.gesture_hold):
             held[f"face:{gesture}"] = True
         out = self.actions.update(self._bindings, held, now)
+        if now < self.buttons_off_until:   # just after an error: keep buttons up rather than chatter
+            out = actions.Output(set(), out.commands)
         bound = [source[5:] for source, _ in self._bindings if source.startswith("face:")]
         self.gesture_steady = a.steady_gestures and bool(bound) and \
             self.gestures.changing(now, actions.thresholds(self.settings), bound)
@@ -194,6 +202,8 @@ class HeadMouse:
             if getattr(s, f"{name}_toggle"):
                 if self.keys.pressed(vk):
                     self._toggled[name] = not self._toggled.get(name, False)
+                if name not in self.controllers:
+                    self._toggled[name] = False   # no feel chosen: don't come back "on" later
                 on = self._toggled.get(name, False)
             else:
                 on = self.keys.held(vk)
@@ -241,6 +251,7 @@ class HeadMouse:
                 self.frozen = not self.frozen
             paused = self.frozen
         else:
+            self.frozen = False
             paused = self.keys.held(self.vk["pause_hold"])
         if paused and not self.paused:
             self._events.append(Event("pause"))
@@ -507,6 +518,7 @@ class Engine:
         def do():
             self.app.practice = on
             self.app.practice_camera = [0.0, 0.0]
+            self.app.action_freeze = self.app.action_precision = False   # not carried into or out of practice
         self.call(do)
 
     def set_offset(self, offset):
@@ -525,6 +537,11 @@ class Engine:
     def apply_settings(self, new_settings, save=True):
         """Use new settings now; with save=True also write the changes to the file."""
         self.call(lambda: self._apply(new_settings, save))
+
+    def apply_changes(self, changes, save=True):
+        """Apply {section: {key: value}} on top of whatever the settings are when it runs - so a
+        window holding an older copy can't undo other changes (like a re-center) made meanwhile."""
+        self.call(lambda: self._apply(config.overlay(self.settings, changes), save))
 
     def play_sound(self, name):
         self.call(lambda: self._sounds.play(name, force=True))
@@ -689,10 +706,16 @@ class Engine:
             self._lost_since = None
             self._lost_beeped = False
         elif event.kind == "recentered" and self.settings.tracking.source == "webcam":
-            new = dataclasses.replace(self.settings, webcam=dataclasses.replace(
-                self.settings.webcam, neutral_yaw=round(event.data[0], 2),
-                neutral_pitch=round(event.data[1], 2)))
-            self._apply(new, save=True)
+            # Save only the new middle: the running settings may be a feel being tried out
+            # (practice game, settings window) that must not end up in the file.
+            neutral = {"neutral_yaw": round(event.data[0], 2), "neutral_pitch": round(event.data[1], 2)}
+            try:
+                config.save_values(self.path, {"webcam": neutral})
+                self._mtime = self._read_mtime()
+            except (OSError, config.SettingsError) as e:
+                self._message("warning", f"Could not save the new middle: {e}")
+            self.settings = config.overlay(self.settings, {"webcam": neutral})
+            self.app.settings = config.overlay(self.app.settings, {"webcam": neutral})
 
     def _update_snapshot(self):
         app, src = self.app, self.source
@@ -745,6 +768,8 @@ class Engine:
                     try:
                         next_check = self._step(now, dt, next_check)
                     except Exception as e:   # keep running; never leave a mouse button held
+                        self.app.actions.reset()
+                        self.app.buttons_off_until = self._clock() + 1.0
                         self.app.set_buttons(set())
                         if repr(e) not in reported:
                             reported.add(repr(e))

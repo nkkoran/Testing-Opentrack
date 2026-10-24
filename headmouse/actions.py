@@ -125,10 +125,13 @@ class Actions:
     def update(self, bindings, held, now):
         """bindings: [(source, action)]; held: {source: bool}. Returns Output."""
         buttons, commands = set(), []
+        sources = {source for source, _ in bindings}
+        pressed_now = {s: bool(held.get(s)) and not self._was.get(s, False) for s in sources}
+        for s in sources:
+            self._was[s] = bool(held.get(s))
         for source, action in bindings:
             down = bool(held.get(source))
-            pressed = down and not self._was.get(source, False)
-            self._was[source] = down
+            pressed = pressed_now[source]   # (worked out once: one key may have several actions)
             if not action:
                 continue
             if action in BUTTONS:

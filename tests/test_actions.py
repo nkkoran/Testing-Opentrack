@@ -219,6 +219,32 @@ class EngineActionTests(unittest.TestCase):
         self.ticks(app, src, 0.1)
         self.assertNotEqual(app.state, "PAUSED")
 
+    def test_changing_a_binding_lets_go_of_a_toggled_button(self):
+        app, src, backend, s = self.make(key1="CAPSLOCK", key1_action="left_toggle")
+        backend.keys_down.add(config.key_code("CAPSLOCK"))
+        self.ticks(app, src, 0.05)
+        backend.keys_down.clear()
+        self.ticks(app, src, 0.1)
+        self.assertEqual(app.buttons_down, {"left"})
+        app.apply_settings(settings(general={"start_enabled": True},
+                                    actions={"enabled": True, "key1": "CAPSLOCK", "key1_action": "recenter"}))
+        self.ticks(app, src, 0.05)
+        self.assertEqual(app.buttons_down, set())
+        self.assertEqual(backend.buttons[-1], ("left", False))
+
+    def test_unbound_freeze_and_practice_clear_action_states(self):
+        app, src, backend, s = self.make(brows_action="freeze")
+        self.ticks(app, src, 0.4, face={"mouth": 0, "brows": 0.9, "smile": 0, "pucker": 0})
+        self.assertTrue(app.action_freeze)
+        app.apply_settings(settings(general={"start_enabled": True}, actions={"enabled": True}))
+        self.assertFalse(app.action_freeze)                            # its gesture is gone: not stuck frozen
+
+    def test_one_key_with_two_actions(self):
+        a = actions.Actions()
+        b = [("k", "left_click"), ("k", "recenter")]
+        out = a.update(b, {"k": True}, 0.0)
+        self.assertEqual((out.buttons, out.commands), ({"left"}, ["recenter"]))
+
     def test_dry_run_sends_no_buttons(self):
         s = settings(general={"start_enabled": True}, actions={"enabled": True, "key1": "CAPSLOCK",
                                                                "key1_action": "left"})

@@ -760,7 +760,7 @@ class SettingsWindow(Child):
 
     def _apply_live(self):
         self._pending = None
-        self.engine.apply_settings(overlay(self.engine.settings, self.changes()), save=False)
+        self.engine.apply_changes(self.changes(), save=False)
         self._show_presets()
 
     def save(self):
@@ -772,7 +772,7 @@ class SettingsWindow(Child):
             return False
         if self._pending:
             self.top.after_cancel(self._pending)
-        self.engine.apply_settings(final, save=True)
+        self.engine.apply_changes(self.changes(), save=True)   # on top of the newest settings
         self.dirty = False
         return self._close_window()
 
@@ -781,7 +781,7 @@ class SettingsWindow(Child):
             self.top.after_cancel(self._pending)
         back = {section: {key: getattr(getattr(self.original, section), key) for key in keys}
                 for section, keys in self._touched.items()}
-        self.engine.apply_settings(overlay(self.engine.settings, back), save=False)
+        self.engine.apply_changes(back, save=False)
         self.dirty = False
         return self._close_window()
 
@@ -1520,9 +1520,14 @@ class SettingsWindow(Child):
 
     def _measure_gestures(self):
         def done(thresholds):
+            values = {f"{g}_threshold": v for g, v in thresholds.items()}
+            if not self.alive():   # the settings window was closed meanwhile: save them straight away
+                if values:
+                    self.engine.apply_changes({"actions": values}, save=True)
+                return
             for g, value in thresholds.items():
                 self.gesture_thresholds[g].set(value)
-            self._set("actions", **{f"{g}_threshold": v for g, v in thresholds.items()})
+            self._set("actions", **values)
             if thresholds:
                 self.saved_label.configure(text="Gesture thresholds set from your measurement - press Save to keep them")
         GestureCalWindow(self.main, done)
@@ -2448,7 +2453,12 @@ class QuickFixWindow(Child):
     def _feel(self):
         try:
             return quickfix.target_feel(self.engine.path, self.current, self.target)
-        except config.SettingsError:
+        except config.SettingsError as e:
+            if self.target_buttons is not None:
+                self.target_buttons.set("Normal")
+            self.target = None   # its preset is missing: fix the normal feel instead
+            self.result.configure(text=f"That feel can't be changed here ({e}) - showing your normal feel.",
+                                  text_color=MUTED)
             return self.current, None
 
     def _show_fixes(self):
@@ -2476,8 +2486,8 @@ class QuickFixWindow(Child):
             messagebox.showerror("HeadMouse", str(e), parent=self.top)
             return
         self.history.append((self.current, self.target, preset, feel))
+        self.engine.apply_changes(config.diff(self.current, new), save=True)   # only what the fix changed
         self.current = new
-        self.engine.apply_settings(new, save=True)
         tip = quickfix.tip(feel, self.axis, key)
         self.result.configure(text="Changed:\n" + "\n".join(f"•  {line}" for line in lines)
                               + (f"\n\nTip: {tip}" if tip else ""), text_color=TEXT)
@@ -2487,10 +2497,16 @@ class QuickFixWindow(Child):
     def undo(self):
         if not self.history:
             return
-        self.current, situation, preset, feel = self.history.pop()
+        before, situation, preset, feel = self.history[-1]
         if situation is not None and not config.is_builtin_preset(preset):
-            config.save_preset(self.engine.path, preset, feel)   # the preset as it was
-        self.engine.apply_settings(self.current, save=True)
+            try:
+                config.save_preset(self.engine.path, preset, feel)   # the preset as it was
+            except config.SettingsError as e:
+                messagebox.showerror("HeadMouse", str(e), parent=self.top)
+                return
+        self.history.pop()
+        self.engine.apply_changes(config.diff(self.current, before), save=True)
+        self.current = before
         self.result.configure(text="Undone - back to how it was before that change.", text_color=MUTED)
         if not self.history:
             self.undo_button.configure(state="disabled")
@@ -2518,6 +2534,7 @@ class PracticeWindow(Child):
         self.last_t = None
         self.playing = False
         self.done_blocks = 0
+        self.applied = self.original   # the settings the engine was last given (as differences)
         self.engine.set_practice(True)
 
         buttons = ctk.CTkFrame(self.top, fg_color="transparent")
@@ -2563,6 +2580,12 @@ class PracticeWindow(Child):
 
     # flow --------------------------------------------------------------------
 
+    def _try(self, settings, save=False):
+        """Run these settings, sending only how they differ from the last ones - so anything changed
+        meanwhile (a re-center) is kept."""
+        self.engine.apply_changes(config.diff(self.applied, settings), save=save)
+        self.applied = settings
+
     def _feel_chosen(self, label):
         self.target = next((n for n in config.SITUATIONS if f"{config.SITUATION_NAMES[n]} feel" == label), None)
         if self.target in ("aim", "build"):
@@ -2570,7 +2593,7 @@ class PracticeWindow(Child):
 
     def start(self):
         focus = next(k for k, v in practice.FOCUSES.items() if v == self.focus.get())
-        self.engine.apply_settings(self.original, save=False)
+        self._try(self.original)
         try:
             feel, self.target_preset = quickfix.target_feel(self.engine.path, self.original, self.target)
         except config.SettingsError as e:
@@ -2589,7 +2612,7 @@ class PracticeWindow(Child):
         if block is None:
             self._show_result()
             return
-        self.engine.apply_settings(block.settings, save=False)   # this block's settings, tried live
+        self._try(block.settings)   # this block's settings, tried live
         self.playing = True
         self.next_at = time.monotonic() + self.GET_READY
         self.heading.configure(text=block.title)
@@ -2615,9 +2638,10 @@ class PracticeWindow(Child):
     def _show_result(self):
         c = self.checkup
         self.playing = False
+        self._try(self.original)
         if not self.original.general.checkup_done:   # for the Getting started list
             self.original = replace(self.original, "general", checkup_done=True)
-        self.engine.apply_settings(self.original, save=True)
+            self._try(self.original, save=True)
         lines = []
         if "precision" in c.scores:
             before, after = c.scores["precision"]
@@ -2631,8 +2655,10 @@ class PracticeWindow(Child):
             before, after = c.scores["turns"]
             lines.append(f"Big turns: {before:.1f} s → {after:.1f} s per target")
         if "steady" in c.scores:
-            lines.append(f"Holding still: wobble {c.scores['steady'][0]:.2f}° "
-                         + ("(steady)" if c.scores["steady"][0] <= practice.WOBBLY else "(a bit shaky)"))
+            shake = c.scores["steady"][0]
+            lines.append("Holding still: not measured" if shake is None else
+                         f"Holding still: wobble {shake:.2f}° " + ("(steady)" if shake <= practice.WOBBLY
+                                                                   else "(a bit shaky)"))
         changes = practice.changes(c.original, c.best)
         if self.target is not None:
             changes = [f'In "{self.target_preset}": {line}' for line in changes]
@@ -2670,12 +2696,12 @@ class PracticeWindow(Child):
         except config.SettingsError as e:
             messagebox.showerror("HeadMouse", str(e), parent=self.top)
             return
-        self.engine.apply_settings(new, save=True)      # saved (and the old settings backed up)
+        self._try(new, save=True)      # saved (and the old settings backed up)
         self.engine.play_sound("done")
         self.top.destroy()
 
     def _restart(self):
-        self.engine.apply_settings(self.original, save=False)
+        self._try(self.original)
         self.choices.pack(fill="x", padx=22, pady=(12, 0), before=self.canvas)
         self.primary.configure(text="Start", command=self.start, state="normal")
         self.secondary.configure(text="Cancel", command=self.close)
@@ -2684,7 +2710,7 @@ class PracticeWindow(Child):
 
     def close(self):
         self.engine.set_practice(False)
-        self.engine.apply_settings(self.original, save=False)  # nothing kept unless chosen
+        self._try(self.original)  # nothing kept unless chosen
         self.top.destroy()
         return True
 

@@ -122,7 +122,8 @@ def precision_score(trials):
 
 
 def wobble(trials):
-    """RMS distance (degrees) of the crosshair from where it rested, while holding still."""
+    """RMS distance (degrees) of the crosshair from where it rested, while holding still
+    (None if it never stayed in the circle long enough to tell)."""
     values = []
     for t in trials:
         pts = [(t.target[0] - s.err[0], t.target[1] - s.err[1]) for s in t.hold_samples()]
@@ -131,7 +132,7 @@ def wobble(trials):
             continue
         mx, my = statistics.fmean(p[0] for p in pts), statistics.fmean(p[1] for p in pts)
         values.append(math.sqrt(statistics.fmean((p[0] - mx) ** 2 + (p[1] - my) ** 2 for p in pts)))
-    return statistics.fmean(values) if values else 0.0
+    return statistics.fmean(values) if values else None
 
 
 def _replace(settings, section, **values):
@@ -310,6 +311,9 @@ class Checkup:
         block = yield Block("steady", "Hold steady", self.best, holds, radius=2.0, dwell=STEADY_SECONDS)
         shake = wobble(block.trials)
         self.scores["steady"] = (shake, shake)
+        if shake is None:
+            self.notes.append("Holding still: couldn't be measured (the crosshair didn't stay in the circle)")
+            return
         if shake <= WOBBLY:
             return
         out = self.best

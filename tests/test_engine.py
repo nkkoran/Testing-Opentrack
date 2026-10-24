@@ -218,6 +218,27 @@ class EngineTests(unittest.TestCase):
         self.engine.stop()
         self.dir.cleanup()
 
+    def test_recenter_while_trying_settings_saves_only_the_middle(self):
+        e = self.start()
+        tried = config.overlay(e.settings, {"assist": {"hybrid": True, "hybrid_gain_x": 2.1}})
+        e.apply_settings(tried, save=False)                     # e.g. a practice block
+        self.assertTrue(wait_for(lambda: e.settings.assist.hybrid_gain_x == 2.1))
+        e.recenter()
+        self.assertTrue(wait_for(lambda: config.load(self.path)[0].webcam.neutral_yaw != 0.0))
+        saved = config.load(self.path)[0]
+        self.assertEqual(saved.assist.hybrid_gain_x, config.Settings().assist.hybrid_gain_x)
+        self.assertFalse(saved.assist.hybrid)
+
+    def test_apply_changes_keeps_a_recenter_made_meanwhile(self):
+        e = self.start()
+        old_copy = e.settings                                   # a window opened before the re-center
+        e.recenter()
+        self.assertTrue(wait_for(lambda: e.settings.webcam.neutral_yaw != 0.0))
+        middle = e.settings.webcam.neutral_yaw
+        e.apply_changes(config.diff(old_copy, config.overlay(old_copy, {"assist": {"wobble_x": 0.4}})), save=True)
+        self.assertTrue(wait_for(lambda: config.load(self.path)[0].assist.wobble_x == 0.4))
+        self.assertEqual(config.load(self.path)[0].webcam.neutral_yaw, middle)
+
     def test_an_error_does_not_stop_the_engine_or_leave_buttons_held(self):
         e = self.start()
         e.call(lambda: e.app.set_buttons({"left"}))

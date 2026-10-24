@@ -212,9 +212,11 @@ def store(path, base, situation, preset, new_feel):
     """Keep a fixed feel. For a situation, the preset part goes into its preset (a copy named
     "<Situation> (adjusted)" if it is built in) and anything else into the normal settings.
     Returns the new normal settings."""
-    from .config import PRESET_ASSIST, PRESET_SECTIONS, SITUATION_NAMES, is_builtin_preset, save_preset
+    from .config import PRESET_ASSIST, PRESET_SECTIONS, SITUATION_NAMES, SettingsError, is_builtin_preset, save_preset
     if situation is None:
         return new_feel
+    if not preset:
+        raise SettingsError(f"the {SITUATION_NAMES[situation]} feel has no preset")
     name = f"{SITUATION_NAMES[situation]} (adjusted)" if is_builtin_preset(preset) else preset
     save_preset(path, name, new_feel)
     out = base

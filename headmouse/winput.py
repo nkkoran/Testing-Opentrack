@@ -70,7 +70,6 @@ class WindowsInput:
         self._user32.GetWindowThreadProcessId.restype = wintypes.DWORD
         self._user32.GetCursorInfo.argtypes = (ctypes.POINTER(CURSORINFO),)
         self._user32.GetCursorInfo.restype = wintypes.BOOL
-        self._cursor = CURSORINFO(cbSize=ctypes.sizeof(CURSORINFO))
         self._pid = os.getpid()
         self._input = INPUT(type=INPUT_MOUSE)
         self.failed_sends = 0
@@ -104,10 +103,10 @@ class WindowsInput:
     def pointer_visible(self):
         """True while Windows shows a mouse pointer (games hide it while the mouse turns the camera).
         A game can also hide it with SetCursor(NULL), which leaves the SHOWING flag set - hence hCursor."""
-        self._cursor.cbSize = ctypes.sizeof(CURSORINFO)
-        if not self._user32.GetCursorInfo(ctypes.byref(self._cursor)):
+        info = CURSORINFO(cbSize=ctypes.sizeof(CURSORINFO))   # its own buffer: called from two threads
+        if not self._user32.GetCursorInfo(ctypes.byref(info)):
             return False
-        return bool(self._cursor.flags & CURSOR_SHOWING) and bool(self._cursor.hCursor)
+        return bool(info.flags & CURSOR_SHOWING) and bool(info.hCursor)
 
     def foreground_window_title(self):
         hwnd = self._user32.GetForegroundWindow()
