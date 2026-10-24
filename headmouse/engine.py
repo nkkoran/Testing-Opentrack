@@ -540,8 +540,17 @@ class Engine:
 
     def apply_changes(self, changes, save=True):
         """Apply {section: {key: value}} on top of whatever the settings are when it runs - so a
-        window holding an older copy can't undo other changes (like a re-center) made meanwhile."""
-        self.call(lambda: self._apply(config.overlay(self.settings, changes), save))
+        window holding an older copy can't undo other changes (like a re-center) made meanwhile.
+        With save=True exactly these values are written - never a feel being tried out."""
+        def do():
+            self._apply(config.overlay(self.settings, changes), save=False)
+            if save and changes:
+                try:
+                    config.save_values(self.path, changes)
+                    self._mtime = self._read_mtime()
+                except (OSError, config.SettingsError) as e:
+                    self._message("warning", f"Could not save settings: {e}")
+        self.call(do)
 
     def play_sound(self, name):
         self.call(lambda: self._sounds.play(name, force=True))
@@ -710,7 +719,7 @@ class Engine:
             # (practice game, settings window) that must not end up in the file.
             neutral = {"neutral_yaw": round(event.data[0], 2), "neutral_pitch": round(event.data[1], 2)}
             try:
-                config.save_values(self.path, {"webcam": neutral})
+                config.save_values(self.path, {"webcam": neutral}, backup=False)
                 self._mtime = self._read_mtime()
             except (OSError, config.SettingsError) as e:
                 self._message("warning", f"Could not save the new middle: {e}")

@@ -479,7 +479,7 @@ class MainWindow:
     def _top_toggled(self):
         on = bool(self.top_switch.get())
         self.root.attributes("-topmost", on)
-        self.engine.apply_settings(replace(self.engine.settings, "general", always_on_top=on))
+        self.engine.apply_changes({"general": {"always_on_top": on}})
 
     def _open(self, name, factory):
         win = self.children.get(name)
@@ -491,6 +491,8 @@ class MainWindow:
         return win
 
     def open_settings(self, tab="Feel"):
+        if self._practising():   # the practice game is trying settings out: don't mix them up
+            return None
         win = self._open("settings", lambda: SettingsWindow(self, tab))
         win.tabs.set(tab)
         win.tab_changed()
@@ -503,7 +505,7 @@ class MainWindow:
         return True
 
     def open_wizard(self):
-        if not self._close_settings():
+        if self._practising() or not self._close_settings():
             return None
         return self._open("wizard", lambda: WizardWindow(self))
 
@@ -522,8 +524,16 @@ class MainWindow:
             self._guide_shown = text
             self.guide_button.configure(text=text)
 
+    def _practising(self):
+        practice = self.children.get("practice")
+        if practice is not None and practice.alive():
+            messagebox.showinfo("HeadMouse", "Finish the practice game first.", parent=self.root)
+            practice.top.lift()
+            return True
+        return False
+
     def open_quickfix(self, axis="x"):
-        if not self._close_settings():
+        if self._practising() or not self._close_settings():
             return None
         return self._open("quickfix", lambda: QuickFixWindow(self, axis))
 
@@ -2459,7 +2469,7 @@ class QuickFixWindow(Child):
             self.target = None   # its preset is missing: fix the normal feel instead
             self.result.configure(text=f"That feel can't be changed here ({e}) - showing your normal feel.",
                                   text_color=MUTED)
-            return self.current, None
+            return self.current, False
 
     def _show_fixes(self):
         for w in self.fix_frame.winfo_children():
@@ -2475,6 +2485,9 @@ class QuickFixWindow(Child):
 
     def apply(self, key):
         feel, preset = self._feel()
+        if preset is False:      # its preset just turned out to be missing: say so, change nothing yet
+            self._show_fixes()
+            return
         new_feel, lines = quickfix.apply(feel, self.axis, key)
         if not lines:
             self.result.configure(text="That's already as far as it goes. Try another fix, or look at "

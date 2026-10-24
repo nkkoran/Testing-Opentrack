@@ -705,10 +705,12 @@ def matching_preset(path, settings):
     return None
 
 
-def save_values(path, updates):
+def save_values(path, updates, backup=True):
     """Write {section: {key: value}} into the settings file, keeping comments.
 
-    The previous file is kept in backups/ first, so any change can be undone.
+    The previous file is kept in backups/ first, so any change can be undone
+    (backup=False for small automatic saves like a re-center, so they don't push
+    older backups out).
     """
     path = Path(path)
     text = path.read_text(encoding="utf-8") if path.exists() else ""
@@ -725,7 +727,7 @@ def save_values(path, updates):
             updates[section][new] = values[old]
     new_text = update_text(text, updates)
     from_dict(tomllib.loads(new_text))  # never write a file that would not load
-    if new_text != text:
+    if new_text != text and backup:
         make_backup(path)
     tmp = path.with_suffix(".tmp")
     tmp.write_text(new_text, encoding="utf-8")

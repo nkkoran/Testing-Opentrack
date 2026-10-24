@@ -229,6 +229,26 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(saved.assist.hybrid_gain_x, config.Settings().assist.hybrid_gain_x)
         self.assertFalse(saved.assist.hybrid)
 
+    def test_a_save_while_trying_settings_writes_only_its_own_values(self):
+        e = self.start()
+        tried = config.overlay(e.settings, {"assist": {"hybrid": True, "hybrid_gain_x": 2.1}})
+        e.apply_settings(tried, save=False)                     # a practice block
+        e.apply_changes({"general": {"always_on_top": True}}, save=True)   # e.g. "Stay on top" meanwhile
+        self.assertTrue(wait_for(lambda: config.load(self.path)[0].general.always_on_top))
+        saved = config.load(self.path)[0]
+        self.assertFalse(saved.assist.hybrid)
+        self.assertEqual(saved.assist.hybrid_gain_x, config.Settings().assist.hybrid_gain_x)
+        self.assertEqual(e.settings.assist.hybrid_gain_x, 2.1)   # still trying it live
+
+    def test_recenter_saves_make_no_backups(self):
+        e = self.start()
+        before = len(config.list_backups(self.path))
+        for _ in range(3):
+            e.recenter()
+            time.sleep(0.2)
+        self.assertTrue(wait_for(lambda: config.load(self.path)[0].webcam.neutral_yaw != 0.0))
+        self.assertEqual(len(config.list_backups(self.path)), before)
+
     def test_apply_changes_keeps_a_recenter_made_meanwhile(self):
         e = self.start()
         old_copy = e.settings                                   # a window opened before the re-center
