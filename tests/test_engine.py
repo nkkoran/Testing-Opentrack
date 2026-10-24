@@ -12,6 +12,7 @@ import io
 from pathlib import Path
 
 from headmouse import config
+from headmouse.safety import TrackingStatus
 from headmouse.engine import Engine, HeadMouse
 from headmouse.filters import OneEuroFilter
 from headmouse.sounds import CUES, SoundPlayer, tone_wav
@@ -223,6 +224,7 @@ class EngineTests(unittest.TestCase):
         tried = config.overlay(e.settings, {"assist": {"hybrid": True, "hybrid_gain_x": 2.1}})
         e.apply_settings(tried, save=False)                     # e.g. a practice block
         self.assertTrue(wait_for(lambda: e.settings.assist.hybrid_gain_x == 2.1))
+        self.assertTrue(wait_for(lambda: e.snapshot().tracking == TrackingStatus.OK))
         e.recenter()
         self.assertTrue(wait_for(lambda: config.load(self.path)[0].webcam.neutral_yaw != 0.0))
         saved = config.load(self.path)[0]
@@ -242,6 +244,7 @@ class EngineTests(unittest.TestCase):
 
     def test_recenter_saves_make_no_backups(self):
         e = self.start()
+        self.assertTrue(wait_for(lambda: e.snapshot().tracking == TrackingStatus.OK))
         before = len(config.list_backups(self.path))
         for _ in range(3):
             e.recenter()
@@ -251,6 +254,7 @@ class EngineTests(unittest.TestCase):
 
     def test_apply_changes_keeps_a_recenter_made_meanwhile(self):
         e = self.start()
+        self.assertTrue(wait_for(lambda: e.snapshot().tracking == TrackingStatus.OK))   # something to re-center on
         old_copy = e.settings                                   # a window opened before the re-center
         e.recenter()
         self.assertTrue(wait_for(lambda: e.settings.webcam.neutral_yaw != 0.0))
