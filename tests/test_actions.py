@@ -202,6 +202,23 @@ class EngineActionTests(unittest.TestCase):
             steady += d.changing(t, {"mouth": 0.5}, ["mouth"])
         self.assertLess(steady * DT, 0.4)
 
+    def test_freeze_key_tap_mode(self):
+        s = settings(general={"start_enabled": True, "freeze_toggle": True})
+        src, backend = FaceSource(), NullInput()
+        backend.window_title = "Enshrouded"
+        app = HeadMouse(s, src, backend)
+        key = s.key("pause_hold")
+        backend.keys_down.add(key)
+        self.ticks(app, src, 0.05)
+        backend.keys_down.clear()
+        self.ticks(app, src, 0.3)
+        self.assertEqual(app.state, "PAUSED")                         # stays frozen after letting go
+        backend.keys_down.add(key)
+        self.ticks(app, src, 0.05)
+        backend.keys_down.clear()
+        self.ticks(app, src, 0.1)
+        self.assertNotEqual(app.state, "PAUSED")
+
     def test_dry_run_sends_no_buttons(self):
         s = settings(general={"start_enabled": True}, actions={"enabled": True, "key1": "CAPSLOCK",
                                                                "key1_action": "left"})

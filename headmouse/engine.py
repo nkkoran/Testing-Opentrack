@@ -80,6 +80,7 @@ class HeadMouse:
         self._focus_since = 0.0
         self.paused = False
         self.precision_on = False   # precision key in toggle mode
+        self.frozen = False         # freeze key in toggle mode
         self.situation = None       # "menu", "aim", "build" or None (normal feel)
         self._toggled = {}          # situations switched on with a tap
         self.actions = actions.Actions()      # click actions from keys and face gestures
@@ -127,6 +128,7 @@ class HeadMouse:
             self.precision_on = False   # always start without precision aim
             self._toggled = {}          # ...and in the normal feel
             self.action_precision = self.action_freeze = False
+            self.frozen = False
             self._events.append(Event("enabled", "Head control ON") if value
                                 else Event("disabled", "Head control OFF"))
 
@@ -234,7 +236,12 @@ class HeadMouse:
                     self.set_enabled(focused)
         window_ok = not (g.only_move_in_game_window and focused is False)
 
-        paused = self.keys.held(self.vk["pause_hold"])
+        if self.settings.general.freeze_toggle:
+            if self.keys.pressed(self.vk["pause_hold"]):
+                self.frozen = not self.frozen
+            paused = self.frozen
+        else:
+            paused = self.keys.held(self.vk["pause_hold"])
         if paused and not self.paused:
             self._events.append(Event("pause"))
         if self.settings.general.precision_toggle:

@@ -338,6 +338,9 @@ link_up_down = false
 precision_toggle = false
 # Set when the practice check-up has been played (for the Getting started list).
 checkup_done = false
+# Freeze key: false = hold it to freeze the camera; true = tap to freeze, tap
+# again to continue.
+freeze_toggle = false
 
 
 # -----------------------------------------------------------------------------

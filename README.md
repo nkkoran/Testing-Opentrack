@@ -122,7 +122,7 @@ changes** goes back.
 | Key | Action |
 |---|---|
 | **F10** | Head control on/off |
-| **F9** (hold) | Freeze camera immediately; release to resume. Overrides everything |
+| **F9** (hold) | Freeze camera immediately; release to resume. Overrides everything. Can be a tap on/off instead (**Settings → Keys & sound**) |
 | **F7** (hold) | Precision mode: 80% slower, for aiming |
 | **F8** | Re-center (look straight at the screen first) |
 | **F6** | Test turn (only while **Settings → Game** is open) |

@@ -76,6 +76,7 @@ class GeneralSettings:
     link_up_down: bool = False
     precision_toggle: bool = False  # True: tap the precision key to switch precision aim on/off
     checkup_done: bool = False      # the practice check-up has been played (Getting started)
+    freeze_toggle: bool = False     # True: tap the freeze key to freeze, tap again to continue
 
 
 @dataclass

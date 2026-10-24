@@ -186,6 +186,8 @@ def describe(snap):
     if snap.paused:
         if snap.frozen_by_action:
             return "Frozen", "Do the freeze gesture or key again to continue", "PAUSED"
+        if s.general.freeze_toggle:
+            return "Frozen", f"Press {k.pause_hold} again to continue", "PAUSED"
         return "Frozen", f"Release {k.pause_hold} to continue", "PAUSED"
     if snap.glancing:
         return "Looking away", "The camera waits until you look back at the screen", "CENTER"
@@ -533,14 +535,16 @@ class MainWindow:
 
     def _show_keys(self, k):
         toggle = self.engine.settings.general.precision_toggle
-        shown = (k.enable_toggle, k.pause_hold, k.precision_hold, k.recenter, toggle)
+        shown = (k.enable_toggle, k.pause_hold, k.precision_hold, k.recenter, toggle,
+                 self.engine.settings.general.freeze_toggle)
         if shown == self._keys_shown:
             return
         self._keys_shown = shown
         for w in self.keys.winfo_children():
             w.destroy()
         self.keys.columnconfigure((0, 1), weight=1, uniform="k")
-        for i, (key, caption) in enumerate(((k.enable_toggle, "on / off"), (k.pause_hold, "hold to freeze"),
+        freeze = "tap: freeze on/off" if self.engine.settings.general.freeze_toggle else "hold to freeze"
+        for i, (key, caption) in enumerate(((k.enable_toggle, "on / off"), (k.pause_hold, freeze),
                                             (k.precision_hold, "tap: slow aim on/off" if toggle else
                                              "hold to aim slowly"), (k.recenter, "re-center"))):
             keycap(self.keys, key, caption).grid(row=i // 2, column=i % 2, sticky="w", pady=3)
@@ -1726,7 +1730,7 @@ class SettingsWindow(Child):
         ctk.CTkLabel(scroll, text="Click a key, then press the key you want - or tap your foot pedal.",
                      font=font(12), text_color=MUTED).pack(anchor="w", pady=(0, 6))
         self.key_buttons = {}
-        for field, label in (("pause_hold", "Freeze camera (hold)"), ("enable_toggle", "Head control on/off"),
+        for field, label in (("pause_hold", "Freeze camera"), ("enable_toggle", "Head control on/off"),
                              ("precision_hold", "Precision aim"), ("recenter", "Re-center"),
                              ("calibrate_turn", "Test turn (game calibration)")):
             row = ctk.CTkFrame(scroll, fg_color=SUBTLE, corner_radius=12)
@@ -1737,6 +1741,14 @@ class SettingsWindow(Child):
                               **self.KEYCAP)
             b.pack(side="right", padx=10)
             self.key_buttons[field] = b
+        self.freeze_toggle = switch(scroll, "Tap the freeze key to freeze, tap again to continue (instead of holding)",
+                                    lambda: self._set("general", freeze_toggle=bool(self.freeze_toggle.get())),
+                                    font=font(12), text_color=TEXT)
+        if self.work.general.freeze_toggle:
+            self.freeze_toggle.select()
+        self.freeze_toggle.pack(anchor="w", pady=(10, 0))
+        ctk.CTkLabel(scroll, text="Precision aim can be a tap too: Settings > Feel, \"For all directions\".",
+                     font=font(11), text_color=MUTED, anchor="w").pack(fill="x")
         ctk.CTkFrame(scroll, height=1, fg_color=BORDER).pack(fill="x", pady=14)
         ctk.CTkLabel(scroll, text="Sound", font=font(15, "bold"), text_color=TEXT).pack(anchor="w")
         self.sound = switch(scroll, "Play sounds (on, off, tracking lost)", lambda: self._set(
