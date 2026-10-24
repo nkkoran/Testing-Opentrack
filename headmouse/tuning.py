@@ -125,14 +125,24 @@ def propose(settings, trials):
     for t in trials:
         m = trial_metrics(t, settings)
         by_dir[m["direction"]].append(m)
+    g = settings.general
+    groups = ([("right", "left")] if g.link_left_right else [("right",), ("left",)]) + \
+             ([("up", "down")] if g.link_up_down else [("up",), ("down",)])
     new = settings
     notes = {}
-    for name, ms in by_dir.items():
+    for group in groups:
+        name = group[0]
+        ms = [m for n in group for m in by_dir[n]]
         d = getattr(settings, name)
         if len(ms) < 2:
             continue
-        if d.points:
-            notes[name] = ["uses a custom points table - not changed"]
+        if name in ("up", "down") and settings.assist.vertical_follow:
+            for n in group:
+                notes[n] = ["follows your head (Settings > Feel) - not changed"]
+            continue
+        if any(getattr(settings, n).points for n in group):
+            for n in group:
+                notes[n] = ["uses a custom points table - not changed"]
             continue
         mean = lambda key: statistics.fmean(m[key] for m in ms)
         over_rate = sum(1 for m in ms if m["overshoot"] > 3.0) / len(ms)
@@ -173,8 +183,9 @@ def propose(settings, trials):
             continue
         full = max(full, dz + 0.5)
         lo = min(lo, hi)
-        new = dataclasses.replace(new, **{name: dataclasses.replace(
-            d, deadzone=round(dz, 1), full_speed_angle=round(full, 1), min_speed=round(lo, 1),
-            max_speed=round(hi / 5) * 5, curve=round(curve, 2))})
-        notes[name] = why
+        for n in group:  # linked directions get the same values
+            new = dataclasses.replace(new, **{n: dataclasses.replace(
+                d, deadzone=round(dz, 1), full_speed_angle=round(full, 1), min_speed=round(lo, 1),
+                max_speed=round(hi / 5) * 5, curve=round(curve, 2))})
+            notes[n] = why
     return new, notes

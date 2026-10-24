@@ -170,12 +170,36 @@ with a red dot where your head is right now.
 | Head turn for full speed | Smaller = less head movement needed |
 | Top speed | Fastest turning |
 | Dead zone | How far you can move before the camera starts turning |
-| Start delay | Wait this long before turning (0 = immediately; e.g. 0.2 s for down lets you glance without moving the camera) |
+| Start delay | Wait this long before turning, in 0.01 s steps (0 = immediately; e.g. 0.2 s for down lets you glance without moving the camera) |
 | Slowest speed *(advanced)* | Speed just outside the dead zone |
 | Curve *(advanced)* | 1 = even; higher = finer control near center, faster further out |
 
-"Copy these to …" makes the opposite direction match. **Precision aim speed** sets how slow
-precision mode is.
+**Keep left and right the same** (or up and down, when Up/Down is chosen) makes the opposite
+direction match and follow every change, including in the setup wizard and the practice game.
+**Precision aim speed** sets how slow precision mode is.
+
+### Steadier control (optional)
+
+Further down **Settings → Feel**. Each helper is off until switched on.
+
+- **Stop when I come back to the middle.** After a turn, once the head is back near the middle
+  (even slightly past it), the camera stays still until the head clearly turns again: **Turn
+  again by** degrees (2.5° by default) away from where it came to rest. This stops the slow
+  drift that otherwise happens when you stop a little off center or overshoot center. It works
+  for up/down too. The first turn from rest is unchanged.
+- **Follow my posture.** While you rest in the dead zone, the middle slowly moves (over about
+  8 s) to where your head actually rests, so leaning or slouching doesn't need the re-center key.
+  It never adjusts while you're turning, never moves more than 6°, and the re-center key resets
+  it.
+
+### Up and down
+
+Looking up and down has less room than left and right, because you still need to see the
+screen. If up/down is hard to control, switch on **Up/down follows my head (like a mouse)**. A
+small head tilt then tilts the camera several times as much (**Strength**, 4× by default), and
+the camera stays where you leave it, so you never have to hold your head tilted. Hold the pause
+key (F9) to move your head back without moving the camera, like lifting a mouse. Left/right
+still work like a joystick. The practice game leaves up/down alone in this mode.
 
 Everything is stored in `headmouse_settings.toml` (with explanations). It can also be edited in
 Notepad, and changes apply within a second.

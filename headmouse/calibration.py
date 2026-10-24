@@ -109,6 +109,15 @@ def propose(settings, source_kind, neutral, movements):
         new = dataclasses.replace(new, **{name: dataclasses.replace(d, deadzone=dead, full_speed_angle=full)})
         report.append(f"{name.title()}: comfortable range {m.extent:.0f}°  ->  dead zone {dead:g}°, "
                       f"full speed at {full:g}°")
+    g = settings.general
+    for pos, neg, linked in (("right", "left", g.link_left_right), ("up", "down", g.link_up_down)):
+        a, b = getattr(new, pos), getattr(new, neg)
+        if not linked or a.points or b.points or (a == getattr(settings, pos) and b == getattr(settings, neg)):
+            continue
+        dead, full = round((a.deadzone + b.deadzone) / 2, 1), round((a.full_speed_angle + b.full_speed_angle) / 2, 1)
+        new = dataclasses.replace(new, **{n: dataclasses.replace(getattr(new, n), deadzone=dead, full_speed_angle=full)
+                                          for n in (pos, neg)})
+        report.append(f"{pos.title()} and {neg} are linked, so both use dead zone {dead:g}°, full speed at {full:g}°")
     if max(neutral.noise_yaw, neutral.noise_pitch) > 1.0:
         problems.append("Tracking was jittery while you held still - check lighting and that your "
                         "face is clearly visible.")

@@ -71,6 +71,8 @@ class GeneralSettings:
     check_for_updates: bool = True
     show_status: bool = True
     setup_done: bool = False
+    link_left_right: bool = False   # Settings > Feel: changing one side changes the other too
+    link_up_down: bool = False
 
 
 @dataclass
@@ -147,6 +149,18 @@ class GlanceSettings:
 
 
 @dataclass
+class AssistSettings:
+    """Optional helpers. All off unless switched on (Settings > Feel)."""
+    return_stop: bool = False         # after a turn, stay still once back in the middle...
+    return_stop_release: float = 2.5  # ...until the head turns this many degrees again
+    auto_center: bool = False         # slowly follow the resting head position
+    auto_center_seconds: float = 8.0
+    auto_center_limit: float = 6.0    # never shift the center more than this (degrees)
+    vertical_follow: bool = False     # up/down follows the head like a mouse
+    vertical_follow_gain: float = 4.0
+
+
+@dataclass
 class Settings:
     tracking: TrackingSettings = field(default_factory=TrackingSettings)
     webcam: WebcamSettings = field(default_factory=WebcamSettings)
@@ -162,6 +176,7 @@ class Settings:
     up: DirectionSettings = field(default_factory=_vertical)
     down: DirectionSettings = field(default_factory=_vertical)
     glance: GlanceSettings = field(default_factory=GlanceSettings)
+    assist: AssistSettings = field(default_factory=AssistSettings)
 
     def source_settings(self):
         """The [webcam] or [opentrack] section for the tracker in use."""
@@ -296,6 +311,11 @@ def validate(s):
     _check(g.look_away_factor > 1, "[glance] look_away_factor must be more than 1")
     _check(g.look_away_speed >= 0, "[glance] look_away_speed must be 0 or more")
     _check(g.settle_time >= 0 and g.settle_speed > 0, "[glance] settle_time >= 0 and settle_speed > 0")
+    a = s.assist
+    _check(0.5 <= a.return_stop_release <= 10, "[assist] return_stop_release must be 0.5-10 degrees")
+    _check(2 <= a.auto_center_seconds <= 60, "[assist] auto_center_seconds must be 2-60")
+    _check(0 <= a.auto_center_limit <= 20, "[assist] auto_center_limit must be 0-20 degrees")
+    _check(0.5 <= a.vertical_follow_gain <= 20, "[assist] vertical_follow_gain must be 0.5-20")
 
 
 def load(path):

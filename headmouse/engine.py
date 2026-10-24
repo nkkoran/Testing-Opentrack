@@ -85,7 +85,10 @@ class HeadMouse:
     def apply_settings(self, settings):
         previous = self.settings
         self.settings = settings
+        old = getattr(self, "controller", None)
         self.controller = MotionController(settings)
+        if old is not None and settings.assist.auto_center:
+            self.controller.drift = list(old.drift)  # keep what auto-center has learned
         self.monitor = TrackingMonitor(settings.safety)
         self.vk = {name: settings.key(name) for name in KEY_NAMES}
         if settings.tracking.source == "webcam":
@@ -104,6 +107,7 @@ class HeadMouse:
             self._events.append(Event("warning", "Cannot re-center: no head tracking right now"))
             return
         self.offset = self.raw_angles
+        self.controller.drift = [0.0, 0.0]
         self._events.append(Event("recentered", f"Re-centered (yaw {self.offset[0]:+.1f}, "
                                                 f"pitch {self.offset[1]:+.1f})", self.offset))
 
@@ -368,7 +372,10 @@ class Engine:
 
     def set_offset(self, offset):
         """Set the neutral head position directly (used by the setup wizard)."""
-        self.call(lambda: setattr(self.app, "offset", tuple(offset)))
+        def do():
+            self.app.offset = tuple(offset)
+            self.app.controller.drift = [0.0, 0.0]
+        self.call(do)
 
     def set_hold(self, reason, on):
         self.call(lambda: (self.app.holds.add if on else self.app.holds.discard)(reason))

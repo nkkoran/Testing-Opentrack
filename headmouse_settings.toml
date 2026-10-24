@@ -115,6 +115,30 @@ settle_speed = 20.0
 
 
 # -----------------------------------------------------------------------------
+#  Control helpers (all off unless you switch them on in Settings > Feel)
+# -----------------------------------------------------------------------------
+[assist]
+# Stop when I come back to the middle: after a turn, once the head is back in
+# the dead zone (or past center), the camera stays still until the head clearly
+# turns again - return_stop_release degrees away from where it rested. Stops
+# slow creeping when you're slightly off center.
+return_stop = false
+return_stop_release = 2.5
+# Follow my posture: while you rest in the dead zone, the center slowly moves to
+# where your head actually rests (over about auto_center_seconds), never more
+# than auto_center_limit degrees. The re-center key resets it.
+auto_center = false
+auto_center_seconds = 8.0
+auto_center_limit = 6.0
+# Up/down follows my head like a mouse: tilting your head tilts the camera by
+# vertical_follow_gain times as much, and it stays where you leave it. Hold the
+# pause key to move your head without moving the camera. Left/right still work
+# like a joystick.
+vertical_follow = false
+vertical_follow_gain = 4.0
+
+
+# -----------------------------------------------------------------------------
 #  Keys. Use names like "F9", "CAPSLOCK", "PAUSE", "SCROLLLOCK", "NUMPAD0",
 #  "A", "MOUSE4", or "" to switch a key off. Keys are only watched, never
 #  blocked, so the game also receives them - choose keys the game doesn't use.
@@ -211,6 +235,9 @@ check_for_updates = true
 show_status = true
 # Set by the setup wizard. false = the wizard opens when HeadMouse starts.
 setup_done = false
+# Settings > Feel: true = changing right also changes left (and the other way round).
+link_left_right = false
+link_up_down = false
 
 
 # -----------------------------------------------------------------------------

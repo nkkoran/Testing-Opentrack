@@ -789,7 +789,7 @@ class SettingsWindow(Child):
             "deadzone": SliderRow(scroll, "Dead zone", 0, 10, 0.1, deg,
                                   lambda v: self._dir_changed("deadzone", v),
                                   "How far you can move before the camera starts turning"),
-            "start_delay": SliderRow(scroll, "Start delay", 0, 0.6, 0.05, lambda v: f"{v:.2f} s",
+            "start_delay": SliderRow(scroll, "Start delay", 0, 1.0, 0.01, lambda v: f"{v:.2f} s",
                                      lambda v: self._dir_changed("start_delay", v),
                                      "Wait this long before turning - lets you glance without moving"),
             "min_speed": SliderRow(scroll, "Slowest speed", 0, 60, 0.5, speed,
@@ -805,14 +805,16 @@ class SettingsWindow(Child):
         self.adv_frame = ctk.CTkFrame(scroll, fg_color="transparent")
         for name in ("min_speed", "curve"):
             self.rows[name].frame.pack(in_=self.adv_frame, fill="x", pady=(10, 0))
-        self.copy_button = secondary_button(scroll, "Copy to Left", self._copy, height=38)
-        self.copy_button.pack(anchor="w", pady=(14, 0))
+        self.link_switch = switch(scroll, "Keep left and right the same", self._link_toggled,
+                                  font=font(13, "bold"), text_color=TEXT)
+        self.link_switch.pack(anchor="w", pady=(14, 0))
         ctk.CTkFrame(scroll, height=1, fg_color=BORDER).pack(fill="x", pady=16)
         self.precision = SliderRow(scroll, "Precision aim speed", 5, 100, 5, lambda v: f"{v:.0f}%",
                                    lambda v: self._set("motion", precision_speed_factor=round(v / 100, 2)),
                                    "Camera speed while the precision key is held")
         self.precision.frame.pack(fill="x")
         self.precision.set(self.work.motion.precision_speed_factor * 100)
+        self._assist_section(scroll)
         ctk.CTkFrame(scroll, height=1, fg_color=BORDER).pack(fill="x", pady=16)
         ctk.CTkLabel(scroll, text="Glancing away", font=font(15, "bold"), text_color=TEXT).pack(anchor="w")
         ctk.CTkLabel(scroll, text="Keep the camera still when you look away from the screen, e.g. at the keyboard.",
@@ -887,6 +889,64 @@ class SettingsWindow(Child):
             config.delete_preset(self.engine.path, name)
             self._show_presets()
 
+    def _assist_section(self, scroll):
+        a = self.work.assist
+        heading = lambda text, sub: (
+            ctk.CTkFrame(scroll, height=1, fg_color=BORDER).pack(fill="x", pady=16),
+            ctk.CTkLabel(scroll, text=text, font=font(15, "bold"), text_color=TEXT).pack(anchor="w"),
+            ctk.CTkLabel(scroll, text=sub, font=font(11), text_color=MUTED, wraplength=470,
+                         justify="left").pack(anchor="w"))
+        heading("Steadier control", "Optional helpers - each one is off until you switch it on.")
+        self.return_switch = switch(scroll, "Stop when I come back to the middle", lambda: self._set(
+            "assist", return_stop=bool(self.return_switch.get())), font=font(14, "bold"), text_color=TEXT)
+        if a.return_stop:
+            self.return_switch.select()
+        self.return_switch.pack(anchor="w", pady=(8, 0))
+        ctk.CTkLabel(scroll, text="After a turn, the camera stays still once your head is back near the middle "
+                                  "(even slightly past it) until you clearly turn again. No more slow creeping.",
+                     font=font(11), text_color=MUTED, wraplength=470, justify="left").pack(anchor="w")
+        self.release_row = SliderRow(scroll, "Turn again by", 1, 6, 0.5, lambda v: f"{v:.1f}°",
+                                     lambda v: self._set("assist", return_stop_release=round(v, 1)),
+                                     "How far you turn from where you rested to start moving again")
+        self.release_row.frame.pack(fill="x", pady=(8, 0))
+        self.release_row.set(a.return_stop_release)
+        self.center_switch = switch(scroll, "Follow my posture (re-center slowly by itself)", lambda: self._set(
+            "assist", auto_center=bool(self.center_switch.get())), font=font(14, "bold"), text_color=TEXT)
+        if a.auto_center:
+            self.center_switch.select()
+        self.center_switch.pack(anchor="w", pady=(14, 0))
+        ctk.CTkLabel(scroll, text="While you rest, the middle slowly moves to where your head actually is - if "
+                                  "you lean or slouch you don't have to press re-center. Never while turning.",
+                     font=font(11), text_color=MUTED, wraplength=470, justify="left").pack(anchor="w")
+        heading("Up and down", "Looking up and down has less room, because you still need to see the screen.")
+        self.follow_switch = switch(scroll, "Up/down follows my head (like a mouse)", self._follow_toggled,
+                                    font=font(14, "bold"), text_color=TEXT)
+        if a.vertical_follow:
+            self.follow_switch.select()
+        self.follow_switch.pack(anchor="w", pady=(8, 0))
+        ctk.CTkLabel(scroll, text=f"A small head tilt tilts the camera several times as much, and it stays where "
+                                  f"you leave it - no holding your head up. Hold {self.work.keys.pause_hold} to "
+                                  f"move your head without moving the camera. Left/right still work as now.",
+                     font=font(11), text_color=MUTED, wraplength=470, justify="left").pack(anchor="w")
+        self.gain_row = SliderRow(scroll, "Strength", 1, 12, 0.5, lambda v: f"{v:.1f}x",
+                                  lambda v: self._set("assist", vertical_follow_gain=round(v, 1)),
+                                  "Camera tilt for each degree of head tilt")
+        self.gain_row.frame.pack(fill="x", pady=(8, 0))
+        self.gain_row.set(a.vertical_follow_gain)
+
+    def _follow_toggled(self):
+        self._set("assist", vertical_follow=bool(self.follow_switch.get()))
+        self._load_direction()
+
+    def _link_field(self):
+        return "link_left_right" if self.direction in ("right", "left") else "link_up_down"
+
+    def _link_toggled(self):
+        on = bool(self.link_switch.get())
+        self._set("general", **{self._link_field(): on})
+        if on:
+            self._copy()
+
     def _glance_toggled(self):
         on = bool(self.glance_switch.get())
         self._set("glance", enabled=on)
@@ -907,15 +967,27 @@ class SettingsWindow(Child):
         d = getattr(self.work, self.direction)
         for name, row in self.rows.items():
             row.set(getattr(d, name))
-            row.enable(not d.points)
         if d.points:
             self.points_note.pack(fill="x", pady=(8, 0), after=self.graph.master)
         else:
             self.points_note.pack_forget()
-        self.copy_button.configure(text=f"Copy these to {PAIRS[self.direction].title()}")
+        pair = sorted((self.direction, PAIRS[self.direction]), key=DIRECTIONS.index)
+        self.link_switch.configure(text=f"Keep {pair[0]} and {pair[1]} the same")
+        if getattr(self.work.general, self._link_field()):
+            self.link_switch.select()
+        else:
+            self.link_switch.deselect()
+        follow = self.work.assist.vertical_follow and self.direction in ("up", "down")
+        for name, row in self.rows.items():
+            row.enable(not d.points and not follow)
+
+    def _linked(self):
+        return getattr(self.work.general, self._link_field())
 
     def _drop_points(self):
         self._set(self.direction, points=[])
+        if self._linked():
+            self._set(PAIRS[self.direction], points=[])
         self._load_direction()
 
     def _dir_changed(self, field, value):
@@ -931,11 +1003,14 @@ class SettingsWindow(Child):
         if d.points:
             return
         self._set(self.direction, **values)
+        if self._linked():
+            self._set(PAIRS[self.direction], **values)
 
     def _copy(self):
         src = getattr(self.work, self.direction)
         self._set(PAIRS[self.direction], **{f: getattr(src, f) for f in self.rows} | {"points": list(src.points)})
-        self.saved_label.configure(text=f"Copied to {PAIRS[self.direction].title()}")
+        self.saved_label.configure(text=f"{PAIRS[self.direction].title()} now matches {self.direction} "
+                                        "and will follow its changes")
 
     def _plot(self, snap):
         c, k = self.graph, self.graph_scale
@@ -963,6 +1038,12 @@ class SettingsWindow(Child):
             pts += [px(a), py(curve.speed(a))]
         c.create_line(*pts, fill=pick(ACCENT), width=3, smooth=True)
         c.create_text(left + 6 * k, top, text="camera °/s", anchor="nw", fill=muted, font=(FAMILY, 9))
+        if self.work.assist.vertical_follow and self.direction in ("up", "down"):
+            c.create_rectangle(0, 0, w, h, fill=bg, outline="")
+            c.create_text(w / 2, h / 2, text="Up/down follows your head like a mouse.\n"
+                                             "Set its strength under \"Up and down\" below.",
+                          fill=pick(TEXT), font=(FAMILY, 12), justify="center")
+            return
         if snap.tracking == TrackingStatus.OK:
             value = {"right": snap.yaw, "left": -snap.yaw, "up": snap.pitch, "down": -snap.pitch}[self.direction]
             if value > 0:
