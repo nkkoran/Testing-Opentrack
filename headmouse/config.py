@@ -426,6 +426,125 @@ def earlier_install_settings():
     return old if old.is_file() else None
 
 
+# --- presets -----------------------------------------------------------------
+# A preset is a named "feel": the four direction curves and the motion settings.
+# Keys, camera, game and glance settings are never touched by a preset.
+
+PRESET_SECTIONS = ("right", "left", "up", "down", "motion")
+DEFAULT_PRESET = "Normal (default)"
+
+
+def _scaled(settings, speed, curve=0.0):
+    out = settings
+    for name in ("right", "left", "up", "down"):
+        d = getattr(out, name)
+        out = dataclasses.replace(out, **{name: dataclasses.replace(
+            d, min_speed=round(d.min_speed * speed, 1), max_speed=min(360.0, round(d.max_speed * speed / 5) * 5),
+            curve=round(min(4.0, max(0.5, d.curve + curve)), 2))})
+    return out
+
+
+def builtin_presets():
+    """{name: Settings} for the presets that come with HeadMouse (they cannot be deleted)."""
+    normal = Settings()
+    return {DEFAULT_PRESET: normal,
+            "Gentle (slower, smoother)": _scaled(normal, 0.6, 0.3),
+            "Fast (quicker turns)": _scaled(normal, 1.4, -0.2)}
+
+
+def preset_folder(path):
+    return Path(path).parent / "presets"
+
+
+def preset_filename(name):
+    """A safe file name for a preset name, or None if nothing usable is left."""
+    clean = re.sub(r"[^A-Za-z0-9 _()+-]", "", name).strip(" .")[:60]
+    return f"{clean}.toml" if clean else None
+
+
+def list_presets(path):
+    """Preset names: the built-in ones first, then the player's own (alphabetical)."""
+    names = list(builtin_presets())
+    folder = preset_folder(path)
+    if folder.is_dir():
+        names += sorted((p.stem for p in folder.glob("*.toml") if p.stem not in names), key=str.lower)
+    return names
+
+
+def is_builtin_preset(name):
+    return name in builtin_presets()
+
+
+def preset_values(settings):
+    """{section: {key: value}} for the parts of `settings` a preset stores."""
+    return {name: dataclasses.asdict(getattr(settings, name)) for name in PRESET_SECTIONS}
+
+
+def save_preset(path, name, settings):
+    """Save the feel part of `settings` as preset `name`. Returns the file written."""
+    if is_builtin_preset(name):
+        raise SettingsError(f'"{name}" is a built-in preset - choose another name')
+    filename = preset_filename(name)
+    if filename is None:
+        raise SettingsError("give the preset a name using letters or numbers")
+    validate(settings)
+    lines = [f"# HeadMouse preset: {name}", ""]
+    for section, values in preset_values(settings).items():
+        lines.append(f"[{section}]")
+        lines += [f"{key} = {format_value(value)}" for key, value in values.items()]
+        lines.append("")
+    folder = preset_folder(path)
+    folder.mkdir(exist_ok=True)
+    dest = folder / filename
+    tmp = dest.with_suffix(".tmp")
+    tmp.write_text("\n".join(lines), encoding="utf-8")
+    tmp.replace(dest)
+    return dest
+
+
+def load_preset(path, name, base):
+    """`base` with the preset's direction curves and motion settings in place."""
+    builtins = builtin_presets()
+    if name in builtins:
+        values = preset_values(builtins[name])
+    else:
+        filename = preset_filename(name)
+        file = preset_folder(path) / filename if filename else None
+        if file is None or not file.is_file():
+            raise SettingsError(f'preset "{name}" was not found')
+        try:
+            data = tomllib.loads(file.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as e:
+            raise SettingsError(f'preset "{name}" could not be read: {e}') from e
+        values = preset_values(base)
+        for section in PRESET_SECTIONS:
+            if isinstance(data.get(section), dict):
+                values[section].update(data[section])
+    merged = {f.name: dataclasses.asdict(getattr(base, f.name)) for f in dataclasses.fields(Settings)}
+    merged.update(values)
+    return from_dict(merged)[0]
+
+
+def delete_preset(path, name):
+    if is_builtin_preset(name):
+        raise SettingsError(f'"{name}" is built in and cannot be deleted')
+    filename = preset_filename(name)
+    if filename:
+        (preset_folder(path) / filename).unlink(missing_ok=True)
+
+
+def matching_preset(path, settings):
+    """The name of the preset `settings` currently matches, or None."""
+    current = preset_values(settings)
+    for name in list_presets(path):
+        try:
+            if preset_values(load_preset(path, name, settings)) == current:
+                return name
+        except SettingsError:
+            continue
+    return None
+
+
 def save_values(path, updates):
     """Write {section: {key: value}} into the settings file, keeping comments.
 

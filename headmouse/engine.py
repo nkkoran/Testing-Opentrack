@@ -64,6 +64,8 @@ class HeadMouse:
         self.enabled = settings.general.start_enabled
         self.offset = (0.0, 0.0)
         self.holds = set()           # extra reasons to stop, e.g. "wizard"
+        self.practice = False        # practice game: steer a virtual camera, never the mouse
+        self.practice_camera = [0.0, 0.0]
         self.state = "STARTING"
         self.result = StepResult()
         self.tracking = TrackingStatus.NO_DATA
@@ -159,18 +161,26 @@ class HeadMouse:
         angles = None
         if self.raw_angles is not None:
             angles = (self.raw_angles[0] - self.offset[0], self.raw_angles[1] - self.offset[1])
-        hold = paused or not self.enabled or not window_ok or bool(self.holds)
+        if self.practice:  # works whether head control is on or off, and outside the game
+            hold = paused or bool(self.holds)
+        else:
+            hold = paused or not self.enabled or not window_ok or bool(self.holds)
         self.result = self.controller.step(angles, dt, hold=hold, precision=precision,
                                            eye_pitch=self.eye_pitch, blink=blink)
+        if self.practice:
+            self.practice_camera[0] += self.result.yaw_speed * dt
+            self.practice_camera[1] += self.result.pitch_speed * dt
 
-        if self.send and (self.result.dx or self.result.dy):
+        if self.send and not self.practice and (self.result.dx or self.result.dy):
             self.backend.send_relative(self.result.dx, self.result.dy)
         if self.backend.failed_sends > self._reported_failures:
             if self._reported_failures == 0:
                 self._events.append(Event("warning", "Windows refused to send the mouse movement."))
             self._reported_failures = self.backend.failed_sends
 
-        if self.holds:
+        if self.practice and not self.holds:
+            self.state = "PRACTICE"
+        elif self.holds:
             self.state = "BUSY: " + ", ".join(sorted(self.holds))
         elif not self.enabled:
             self.state = "OFF"
@@ -256,6 +266,7 @@ class Snapshot:
     gaze: float = None
     eye_pitch: float = None
     rate: float = 0.0
+    practice_camera: tuple = (0.0, 0.0)
     dry_run: bool = False
     settings: object = None
 
@@ -347,6 +358,13 @@ class Engine:
 
     def recenter(self):
         self.call(self.app.recenter)
+
+    def set_practice(self, on):
+        """Practice game: head control turns a virtual camera instead of the mouse."""
+        def do():
+            self.app.practice = on
+            self.app.practice_camera = [0.0, 0.0]
+        self.call(do)
 
     def set_offset(self, offset):
         """Set the neutral head position directly (used by the setup wizard)."""
@@ -516,6 +534,7 @@ class Engine:
             packets=getattr(src, "packets", 0), in_game=app.in_game,
             test_turn_active=self._turn_remaining > 0, dry_run=self.dry_run,
             glancing=r.glancing, gaze=r.gaze, eye_pitch=app.eye_pitch, rate=self.rate,
+            practice_camera=tuple(app.practice_camera),
             settings=self.settings)
         with self._lock:
             self._snapshot = snap

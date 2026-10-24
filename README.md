@@ -129,6 +129,39 @@ exactly like F9.
 
 ## 6. Adjusting the feel
 
+### Let HeadMouse find the settings: the practice game
+
+**Settings → Feel → Find my best settings (practice game).** Blue targets appear; steer the
+crosshair onto each one with your head, exactly like in the game, and hold it there until it turns
+green. The mouse is not moved and head control doesn't need to be on.
+
+- **Round 1** (12 targets, about a minute) uses your current settings. HeadMouse watches how you
+  reach the targets in each direction: overshooting, creeping up slowly, holding full tilt for a
+  long time, or drifting off the target.
+- **Round 2** tries adjusted settings (small, bounded changes).
+- At the end it shows both times and exactly what changed. **Nothing is kept unless you press
+  "Use the new settings"**, and the old settings are backed up even then. If your settings already
+  suit you, it says so and changes nothing.
+
+Run it again any time, for example after getting used to the new settings.
+
+### Presets
+
+A preset is a named feel: the four direction settings plus precision speed. Keys, camera, game
+and glance settings are never changed by a preset.
+
+- **Switch:** the **Feel** menu on the main window applies a preset straight away. If your current
+  feel isn't saved yet, it offers to save it first.
+- **Save:** pick **Save current as a preset...** in that menu, or **Save as...** in **Settings →
+  Feel**.
+- **Try / delete:** in **Settings → Feel**, choosing a preset tries it live (press **Save** to keep
+  it). **Delete** removes one of your own presets.
+- Built in: **Normal (default)**, **Gentle (slower, smoother)** and **Fast (quicker turns)**.
+
+Presets are small files in the `presets` folder next to the settings file, and updates keep them.
+
+### Adjusting by hand
+
 Open **Settings → Feel** and choose a direction. The graph shows camera speed against head angle,
 with a red dot where your head is right now.
 
@@ -243,11 +276,12 @@ headmouse/controller.py       joystick logic: dead zones, start delay, no-revers
 headmouse/glance.py           glance guard: pauses while looking away (gaze from head + eyes, look-away range)
 headmouse/engine.py           the loop on a background thread; keys, sounds, auto-on, test turn
 headmouse/calibration.py      setup-wizard maths
+headmouse/tuning.py           practice game: measures each direction and proposes better settings
 headmouse/gui.py              the window (CustomTkinter): main screen, Settings, setup wizard
 headmouse/opentrack_setup.py  OpenTrack profile copy/patch and launching
 headmouse/winput.py           Windows SendInput / GetAsyncKeyState
 headmouse/sounds.py           generated tone cues (winsound)
-headmouse/config.py           settings loading, validation and comment-preserving saving
+headmouse/config.py           settings loading, validation, comment-preserving saving, backups, presets
 headmouse/updates.py          checks GitHub Releases for a newer version and installs it
 headmouse/selfcheck.py        --selfcheck: verifies an installation (used by the build pipeline)
 installer/headmouse.iss       Windows installer (Inno Setup)

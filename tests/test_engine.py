@@ -300,6 +300,17 @@ class EngineTests(unittest.TestCase):
         src.latest = real
         self.assertTrue(wait_for(lambda: "tracking_ok" in self.sounds.played))
 
+    def test_practice_turns_virtual_camera_not_mouse(self):
+        e = self.start()
+        e.set_enabled(False)                      # practice works even with head control off
+        e.set_practice(True)
+        self.assertTrue(wait_for(lambda: e.snapshot().state == "PRACTICE"))
+        self.backend.sent.clear()
+        self.assertTrue(wait_for(lambda: e.snapshot().practice_camera[0] > 5))
+        self.assertEqual(self.backend.sent, [])
+        e.set_practice(False)
+        self.assertTrue(wait_for(lambda: e.snapshot().state == "OFF"))
+
     def test_wizard_hold_stops_movement(self):
         e = self.start()
         e.set_hold("wizard", True)

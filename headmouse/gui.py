@@ -6,6 +6,7 @@ Everything here talks to the Engine, which does the real work on its own thread.
 
 import base64
 import dataclasses
+import math
 import sys
 import threading
 import time
@@ -15,7 +16,7 @@ from tkinter import messagebox
 
 import customtkinter as ctk
 
-from . import calibration, config, opentrack_setup, updates
+from . import calibration, config, opentrack_setup, tuning, updates
 from .curves import DirectionCurve
 from .engine import Engine, uses_eyes
 from .keys import name_from_tk_keysym
@@ -100,8 +101,10 @@ def switch(parent, text, command, big=False, **kw):
 
 def small_button(parent, text, command, **kw):
     kw.setdefault("height", 34)
+    kw.setdefault("fg_color", ACCENT)
+    kw.setdefault("hover_color", ACCENT_HOVER)
     return ctk.CTkButton(parent, text=text, command=command, corner_radius=10, font=font(13, "bold"),
-                         fg_color=ACCENT, hover_color=ACCENT_HOVER, text_color_disabled=MUTED, **kw)
+                         text_color_disabled=MUTED, **kw)
 
 
 def dropdown(parent, values, command=None, **kw):
@@ -171,6 +174,8 @@ def describe(snap):
         if snap.tracking == TrackingStatus.FROZEN:
             return "Tracking froze", "OpenTrack may have lost your face.", "STOPPED"
         return "No tracking", "Start OpenTrack with the HeadMouse profile and press Start.", "STOPPED"
+    if state == "PRACTICE":
+        return "Practice game", "The game's camera isn't moved while you practise", "BUSY"
     if not snap.enabled:
         game = s.general.game_window_title
         if s.general.auto_enable_in_game and game:
@@ -187,6 +192,28 @@ def describe(snap):
     if "precision" in state:
         return "Precision aim", f"Slow mode while {k.precision_hold} is held", "ACTIVE"
     return "On", f"Hold {k.pause_hold} to freeze the camera", "ACTIVE"
+
+
+CUSTOM_PRESET = "Custom (not saved as a preset)"
+SAVE_PRESET = "Save current as a preset..."
+
+
+def save_preset_as(engine, settings, parent):
+    """Ask for a name and save the feel part of `settings` as a preset. Returns the name, or None."""
+    dialog = ctk.CTkInputDialog(title="Save preset", text='Name for this preset (for example "Evening"):')
+    name = (dialog.get_input() or "").strip()
+    if not name:
+        return None
+    filename = config.preset_filename(name)
+    if (filename and not config.is_builtin_preset(name)
+            and (config.preset_folder(engine.path) / filename).exists()
+            and not messagebox.askyesno("HeadMouse", f'Replace the preset "{name}"?', parent=parent)):
+        return None
+    try:
+        return config.save_preset(engine.path, name, settings).stem
+    except (OSError, config.SettingsError) as e:
+        messagebox.showerror("HeadMouse", f"Could not save the preset: {e}", parent=parent)
+        return None
 
 
 class HeadView:
@@ -295,6 +322,14 @@ class MainWindow:
         secondary_button(buttons, "Re-center", engine.recenter).grid(row=0, column=0, sticky="ew", padx=(0, 6))
         primary_button(buttons, "Settings", self.open_settings).grid(row=0, column=1, sticky="ew", padx=(6, 0))
 
+        presets = ctk.CTkFrame(outer, fg_color="transparent")
+        presets.pack(fill="x", pady=(12, 0))
+        ctk.CTkLabel(presets, text="Feel", font=font(14, "bold"), text_color=TEXT).pack(side="left")
+        self.preset_menu = dropdown(presets, [CUSTOM_PRESET], command=self._preset_picked, height=34)
+        self.preset_menu.pack(side="right", fill="x", expand=True, padx=(14, 0))
+        self._preset_values = None
+        self._preset_next_check = 0.0
+
         self.keys = ctk.CTkFrame(outer, fg_color="transparent")
         self.keys.pack(fill="x", pady=(14, 4))
         self._keys_shown = None
@@ -367,6 +402,53 @@ class MainWindow:
             self.root.after(0, self.close)
         threading.Thread(target=work, daemon=True).start()
 
+    def _show_presets(self, settings, force=False):
+        values = config.preset_values(settings)
+        now = time.monotonic()
+        if not force and values == self._preset_values and now < self._preset_next_check:
+            return
+        self._preset_values, self._preset_next_check = values, now + 3.0
+        current = config.matching_preset(self.engine.path, settings)
+        names = config.list_presets(self.engine.path) + ([] if current else [CUSTOM_PRESET]) + [SAVE_PRESET]
+        if names != self.preset_menu.cget("values"):
+            self.preset_menu.configure(values=names)
+        if self.preset_menu.get() != (current or CUSTOM_PRESET):
+            self.preset_menu.set(current or CUSTOM_PRESET)
+
+    def _preset_picked(self, name):
+        settings = self.engine.settings
+        try:
+            if name == SAVE_PRESET:
+                saved = save_preset_as(self.engine, settings, self.root)
+                if saved:
+                    self.message.configure(text=f'Saved the current feel as "{saved}".')
+                return
+            if name == CUSTOM_PRESET or name == config.matching_preset(self.engine.path, settings):
+                return
+            practice = self.children.get("practice")
+            if practice is not None and practice.alive():
+                messagebox.showinfo("HeadMouse", "Finish the practice game first.", parent=self.root)
+                return
+            if not self._close_settings():
+                return
+            settings = self.engine.settings
+            if config.matching_preset(self.engine.path, settings) is None:
+                answer = messagebox.askyesnocancel(
+                    "HeadMouse", f'Switch to "{name}"?\n\nYour current feel is not saved as a preset. '
+                                 "Save it first so you can come back to it?", parent=self.root)
+                if answer is None or (answer and not save_preset_as(self.engine, settings, self.root)):
+                    return
+            try:
+                new = config.load_preset(self.engine.path, name, self.engine.settings)
+            except config.SettingsError as e:
+                messagebox.showerror("HeadMouse", str(e), parent=self.root)
+                return
+            self.engine.apply_settings(new, save=True)
+            self.message.configure(text=f'Feel: "{name}"')
+            self._notice_until = time.monotonic() + 5
+        finally:
+            self._show_presets(self.engine.settings, force=True)
+
     def _switch_flipped(self):
         self.engine.set_enabled(bool(self.switch.get()))
 
@@ -398,12 +480,21 @@ class MainWindow:
         win.tab_changed()
         return win
 
-    def open_wizard(self):
+    def _close_settings(self):
         settings = self.children.get("settings")
         if settings is not None and settings.top.winfo_exists():
-            if not settings.close():
-                return None
+            return settings.close()
+        return True
+
+    def open_wizard(self):
+        if not self._close_settings():
+            return None
         return self._open("wizard", lambda: WizardWindow(self))
+
+    def open_practice(self):
+        if not self._close_settings():
+            return None
+        return self._open("practice", lambda: PracticeWindow(self))
 
     def close(self):
         self.engine.stop()
@@ -451,6 +542,7 @@ class MainWindow:
             self.speed.configure(text="Camera still", text_color=MUTED)
         self.camera_switch.configure(state="normal" if snap.source_kind == "webcam" else "disabled")
         self._show_keys(snap.settings.keys)
+        self._show_presets(snap.settings)
         if self.update_info and not self.update_button.winfo_ismapped():
             self.update_button.configure(text=f"Update to {self.update_info[0]}")
             self.update_button.pack(side="right", padx=(0, 8))
@@ -611,6 +703,7 @@ class SettingsWindow(Child):
     def _apply_live(self):
         self._pending = None
         self.engine.apply_settings(overlay(self.engine.settings, self.changes()), save=False)
+        self._show_presets()
 
     def save(self):
         final = overlay(self.engine.settings, self.changes())
@@ -657,6 +750,19 @@ class SettingsWindow(Child):
     def _feel_tab(self, tab):
         scroll = scroll_frame(tab)
         scroll.pack(fill="both", expand=True)
+        self.feel_top = ctk.CTkFrame(scroll, fg_color="transparent")
+        self.feel_top.pack(fill="x", pady=(0, 12))
+        primary_button(self.feel_top, "Find my best settings (practice game)", self.main.open_practice,
+                       height=42).pack(fill="x")
+        row = ctk.CTkFrame(self.feel_top, fg_color="transparent")
+        row.pack(fill="x", pady=(10, 0))
+        ctk.CTkLabel(row, text="Preset", font=font(13, "bold"), text_color=TEXT).pack(side="left")
+        small_button(row, "Delete", self._delete_preset, width=70, fg_color=SUBTLE, hover_color=SUBTLE_HOVER,
+                     text_color=TEXT).pack(side="right")
+        small_button(row, "Save as...", self._save_preset, width=90).pack(side="right", padx=6)
+        self.preset_menu = dropdown(row, [CUSTOM_PRESET], command=self._preset_chosen, height=34)
+        self.preset_menu.pack(side="left", fill="x", expand=True, padx=(10, 0))
+        self._show_presets()
         ctk.CTkLabel(scroll, text="Which direction?", font=font(13), text_color=MUTED).pack(anchor="w")
         self.dir_buttons = segmented(scroll, ["Right", "Left", "Up", "Down"], self._direction_selected)
         self.dir_buttons.pack(fill="x", pady=(4, 10))
@@ -740,6 +846,46 @@ class SettingsWindow(Child):
         self.far_row.frame.pack(fill="x", pady=(8, 0))
         self.far_row.set(g.look_away_factor)
         self._load_direction()
+
+    def _show_presets(self):
+        current = config.matching_preset(self.engine.path, self.work)
+        names = config.list_presets(self.engine.path) + ([] if current else [CUSTOM_PRESET])
+        self.preset_menu.configure(values=names)
+        self.preset_menu.set(current or CUSTOM_PRESET)
+
+    def _preset_chosen(self, name):
+        if name == CUSTOM_PRESET:
+            return
+        try:
+            new = config.load_preset(self.engine.path, name, self.work)
+        except config.SettingsError as e:
+            messagebox.showerror("HeadMouse", str(e), parent=self.top)
+            self._show_presets()
+            return
+        for section in config.PRESET_SECTIONS:
+            self._set(section, **dataclasses.asdict(getattr(new, section)))
+        self._load_direction()
+        self.precision.set(self.work.motion.precision_speed_factor * 100)
+        self._show_presets()
+        self.saved_label.configure(text=f'Trying "{name}" - press Save to keep it')
+
+    def _save_preset(self):
+        name = save_preset_as(self.engine, self.work, self.top)
+        if name:
+            self._show_presets()
+            self.saved_label.configure(text=f'Saved as preset "{name}"' +
+                                       (" - press Save to keep these settings too" if self.dirty else ""))
+
+    def _delete_preset(self):
+        name = self.preset_menu.get()
+        if name == CUSTOM_PRESET or config.is_builtin_preset(name):
+            messagebox.showinfo("HeadMouse", "Choose one of your own presets to delete. "
+                                             "The built-in ones can't be deleted.", parent=self.top)
+            return
+        if messagebox.askyesno("HeadMouse", f'Delete the preset "{name}"?\n\nYour current settings stay '
+                                            "as they are.", parent=self.top):
+            config.delete_preset(self.engine.path, name)
+            self._show_presets()
 
     def _glance_toggled(self):
         on = bool(self.glance_switch.get())
@@ -1482,3 +1628,228 @@ def run_gui(settings_path, base_dir, dry_run=False, engine=None):
     MainWindow(root, engine)
     root.mainloop()
     return 0
+
+
+class PracticeWindow(Child):
+    """Practice game: steer onto targets, then HeadMouse suggests settings that suit you."""
+
+    SCENE = ("#0f172a", "#0b1120")
+    GRID = ("#1e293b", "#172033")
+    PX_PER_DEG = 8.0
+
+    def __init__(self, main):
+        super().__init__(main, "HeadMouse practice", "780x700")
+        self.original = self.engine.settings
+        self.round = 0
+        self.scores = []
+        self.proposal = None
+        self.notes = {}
+        self.trial = None
+        self.trials = []
+        self.targets = []
+        self.cam_start = (0.0, 0.0)
+        self.next_at = None
+        self.last_t = None
+        self.playing = False
+        self.engine.set_practice(True)
+
+        buttons = ctk.CTkFrame(self.top, fg_color="transparent")
+        buttons.pack(side="bottom", fill="x", padx=24, pady=(6, 18))
+        self.secondary = secondary_button(buttons, "Cancel", self.close, width=180)
+        self.secondary.pack(side="left")
+        self.primary = primary_button(buttons, "Start", self.start_round, width=220)
+        self.primary.pack(side="right")
+        body = card(self.top)
+        body.pack(fill="both", expand=True, padx=24, pady=(18, 6))
+        self.heading = ctk.CTkLabel(body, text="Find your best settings", font=font(22, "bold"),
+                                    text_color=TEXT, anchor="w")
+        self.heading.pack(fill="x", padx=22, pady=(18, 2))
+        self.text = ctk.CTkLabel(body, font=font(14), text_color=MUTED, wraplength=680, justify="left", anchor="w",
+                                 text="Steer the crosshair onto each blue target with your head, just like in the "
+                                      "game, and hold it there for a moment. Two short rounds of 12 targets (about "
+                                      "a minute each). The first uses your current settings, the second tries "
+                                      "adjusted ones. Nothing changes unless you choose to keep it.")
+        self.text.pack(fill="x", padx=22)
+        self.k = window_scaling(self.top)
+        self.canvas = tk.Canvas(body, width=int(700 * self.k), height=int(380 * self.k), highlightthickness=0, bd=0)
+        self.canvas.pack(padx=20, pady=12)
+        self.status = ctk.CTkLabel(body, text="", font=font(14, "bold"), text_color=TEXT)
+        self.status.pack(pady=(0, 6))
+        self.progress = ctk.CTkProgressBar(body, height=8, progress_color=ACCENT, fg_color=TRACK)
+        self.progress.pack(fill="x", padx=22, pady=(0, 16))
+        self.progress.set(0)
+        self.poll()
+
+    # flow --------------------------------------------------------------------
+
+    def start_round(self):
+        self.round += 1
+        self.targets = tuning.make_targets()
+        self.trials = []
+        self.trial = None
+        self.next_at = time.monotonic() + 0.8
+        self.playing = True
+        self.primary.configure(state="disabled", text="Playing...")
+        self.secondary.configure(text="Stop", command=self.close)
+        self.heading.configure(text=f"Round {self.round} of 2" + ("  -  adjusted settings" if self.round == 2 else ""))
+        self.text.configure(text="Steer onto the blue target and hold still until it turns green.")
+
+    def _next_target(self, snap):
+        if len(self.trials) == len(self.targets):
+            self._round_done()
+            return
+        target = self.targets[len(self.trials)]
+        self.trial = tuning.Trial(target)
+        self.cam_start = snap.practice_camera
+        self.status.configure(text=f"Target {len(self.trials) + 1} of {len(self.targets)}")
+
+    def _round_done(self):
+        settings = self.engine.settings
+        score = tuning.score(self.trials, settings)
+        self.scores.append(score)
+        self.trial = None
+        self.playing = False
+        if self.round == 1:
+            self.proposal, self.notes = tuning.propose(settings, self.trials)
+            if not self.notes:
+                self._show_result(no_change=True)
+                return
+            self.engine.apply_settings(self.proposal, save=False)   # try them in round 2
+            self.heading.configure(text="Round 1 done")
+            self.text.configure(text=f"Average {score:.1f} s per target. HeadMouse has adjusted your settings - "
+                                     "now try them in round 2.")
+            self.primary.configure(state="normal", text="Start round 2")
+            self.status.configure(text="")
+        else:
+            self._show_result()
+
+    def _show_result(self, no_change=False):
+        self.round = 99
+        self.primary.configure(state="normal")
+        if no_change:
+            self.heading.configure(text="Your settings already suit you")
+            self.text.configure(text=f"Average {self.scores[0]:.1f} s per target, without overshooting or "
+                                     "struggling. No changes needed.")
+            self.primary.configure(text="Done", command=self.close)
+            self.secondary.configure(text="Practice again", command=self._restart)
+            return
+        before, after = self.scores
+        better = tuning.worth_keeping(before, after)
+        lines = [f"Average time per target: {before:.1f} s with your settings, {after:.1f} s with the new ones."]
+        for name in DIRECTIONS:
+            if name not in self.notes:
+                continue
+            o, n = getattr(self.original, name), getattr(self.proposal, name)
+            changes = [f"{label} {getattr(o, f):g} → {getattr(n, f):g}"
+                       for f, label in (("deadzone", "dead zone"), ("full_speed_angle", "full speed at"),
+                                        ("min_speed", "slowest"), ("max_speed", "top speed"), ("curve", "curve"))
+                       if getattr(o, f) != getattr(n, f)]
+            lines.append(f"{name.title()}: {'; '.join(self.notes[name])}" + (f"  ({', '.join(changes)})" if changes else ""))
+        self.heading.configure(text="The new settings worked better" if better else "Your old settings did better")
+        self.text.configure(text="\n".join(lines))
+        self.status.configure(text="")
+        if better:
+            self.primary.configure(text="Use the new settings", command=self._use_new)
+            self.secondary.configure(text="Keep my old settings", command=self.close)
+        else:
+            self.primary.configure(text="Keep my old settings", command=self.close)
+            self.secondary.configure(text="Use the new ones anyway", command=self._use_new)
+
+    def _use_new(self):
+        new = self.proposal
+        self.engine.set_practice(False)
+        self.engine.apply_settings(new, save=True)      # saved (and the old settings backed up)
+        self.engine.play_sound("done")
+        self.top.destroy()
+
+    def _restart(self):
+        self.engine.apply_settings(self.original, save=False)
+        self.round = 0
+        self.scores = []
+        self.primary.configure(text="Start", command=self.start_round)
+        self.secondary.configure(text="Cancel", command=self.close)
+        self.start_round()
+
+    def close(self):
+        self.engine.set_practice(False)
+        self.engine.apply_settings(self.original, save=False)  # nothing kept unless chosen
+        self.top.destroy()
+        return True
+
+    # drawing -----------------------------------------------------------------
+
+    def _draw(self, snap):
+        c, k = self.canvas, self.k
+        w, h = int(c["width"]), int(c["height"])
+        c.delete("all")
+        c.configure(bg=pick(self.SCENE))
+        cx, cy = w / 2, h / 2
+        cam = snap.practice_camera
+        ppd = self.PX_PER_DEG * k
+        step = 10 * ppd
+        ox = (-cam[0] * ppd) % step
+        oy = (cam[1] * ppd) % step
+        grid = pick(self.GRID)
+        x = ox - step
+        while x < w + step:
+            c.create_line(cx + x - w / 2, 0, cx + x - w / 2, h, fill=grid)
+            x += step
+        y = oy - step
+        while y < h + step:
+            c.create_line(0, cy + y - h / 2, w, cy + y - h / 2, fill=grid)
+            y += step
+        if self.trial is not None:
+            tx = cx + (self.cam_start[0] + self.trial.target[0] - cam[0]) * ppd
+            ty = cy - (self.cam_start[1] + self.trial.target[1] - cam[1]) * ppd
+            on = self.trial._inside
+            r = tuning.RADIUS * ppd
+            if 0 <= tx <= w and 0 <= ty <= h:
+                color = "#22c55e" if on else "#3b82f6"
+                c.create_oval(tx - r * 2.2, ty - r * 2.2, tx + r * 2.2, ty + r * 2.2, outline=color, width=3)
+                c.create_oval(tx - r * 0.7, ty - r * 0.7, tx + r * 0.7, ty + r * 0.7, fill=color, outline="")
+            else:  # off screen: arrow at the edge pointing to it
+                ang = math.atan2(ty - cy, tx - cx)
+                ex = cx + math.cos(ang) * (w / 2 - 24 * k)
+                ey = cy + math.sin(ang) * (h / 2 - 24 * k)
+                ex, ey = min(max(ex, 24 * k), w - 24 * k), min(max(ey, 24 * k), h - 24 * k)
+                s = 16 * k
+                pts = [(ex + math.cos(ang) * s, ey + math.sin(ang) * s),
+                       (ex + math.cos(ang + 2.5) * s, ey + math.sin(ang + 2.5) * s),
+                       (ex + math.cos(ang - 2.5) * s, ey + math.sin(ang - 2.5) * s)]
+                c.create_polygon(*[v for p in pts for v in p], fill="#3b82f6", outline="")
+        a = 14 * k
+        c.create_line(cx - a, cy, cx - a / 3, cy, fill="white", width=2)
+        c.create_line(cx + a / 3, cy, cx + a, cy, fill="white", width=2)
+        c.create_line(cx, cy - a, cx, cy - a / 3, fill="white", width=2)
+        c.create_line(cx, cy + a / 3, cx, cy + a, fill="white", width=2)
+        if snap.tracking != TrackingStatus.OK:
+            c.create_text(cx, cy + 50 * k, text="Can't see you - face the camera", fill="#f87171",
+                          font=(FAMILY, 14, "bold"))
+
+    def poll(self):
+        if not self.alive():
+            return
+        snap = self.engine.snapshot()
+        now = time.monotonic()
+        dt = 0.0 if self.last_t is None else now - self.last_t
+        self.last_t = now
+        if self.playing:
+            if self.trial is None and self.next_at is not None and now >= self.next_at:
+                self.next_at = None
+                self._next_target(snap)
+            elif self.trial is not None:
+                if snap.tracking != TrackingStatus.OK:
+                    if self.trial.start is not None:
+                        self.trial.start += dt  # the clock stops while tracking is lost
+                else:
+                    cam = snap.practice_camera
+                    rel = (cam[0] - self.cam_start[0], cam[1] - self.cam_start[1])
+                    if self.trial.add(now, rel, (snap.yaw, snap.pitch), (snap.yaw_speed, snap.pitch_speed)):
+                        if self.trial.acquired:
+                            self.engine.play_sound("target")
+                        self.trials.append(self.trial)
+                        self.trial = None
+                        self.next_at = now + 0.5
+            self.progress.set((len(self.trials) + (self.round - 1) * len(self.targets)) / (2 * len(self.targets)))
+        self._draw(snap)
+        self.top.after(16, self.poll)
