@@ -72,6 +72,11 @@ class ActionTests(unittest.TestCase):
         off = settings(actions={"enabled": False, "key1": "CAPSLOCK", "key1_action": "left"})
         self.assertEqual(actions.bindings(off), [])
 
+    def test_face_reading_starts_with_the_master_switch(self):
+        from headmouse.engine import needs_face
+        self.assertFalse(needs_face(settings()))
+        self.assertTrue(needs_face(settings(actions={"enabled": True})))   # meters work before binding
+
     def test_validation(self):
         with self.assertRaises(config.SettingsError):
             settings(actions={"key1_action": "explode"})
@@ -146,6 +151,7 @@ class EngineActionTests(unittest.TestCase):
         self.ticks(app, src, 0.4, face=face)
         self.assertTrue(app.action_freeze)
         self.assertEqual(app.state, "PAUSED")
+        self.assertTrue(app.paused)
         self.ticks(app, src, 0.4, face={**face, "brows": 0.0})
         self.ticks(app, src, 0.4, face={**face, "brows": 0.9})
         self.assertFalse(app.action_freeze)

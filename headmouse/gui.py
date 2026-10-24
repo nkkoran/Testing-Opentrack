@@ -184,6 +184,8 @@ def describe(snap):
     if state.startswith("WAITING"):
         return "Waiting for the game", f"Moves the camera only in {s.general.game_window_title}", "WAITING"
     if snap.paused:
+        if snap.frozen_by_action:
+            return "Frozen", "Do the freeze gesture or key again to continue", "PAUSED"
         return "Frozen", f"Release {k.pause_hold} to continue", "PAUSED"
     if snap.glancing:
         return "Looking away", "The camera waits until you look back at the screen", "CENTER"

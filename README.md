@@ -303,8 +303,11 @@ the keyboard:
 - **Safety:** buttons are only pressed while head control is on and the game window is in front,
   never during the practice game, and every button is let go when head control turns off or
   HeadMouse closes. The window shows which buttons HeadMouse is holding.
-- A held right button also counts as the aiming key for **Situations**, so "open mouth to aim"
-  can switch to the aiming feel too.
+- A held right button should also count as the aiming key for **Situations**, so "open mouth to
+  aim" can switch to the aiming feel too. Check that the Situations tab shows Aiming while you
+  hold the gesture.
+- Opening the mouth moves the face a little, which can nudge the camera as you click. Eyebrows or
+  a key are steadier for precise shots.
 
 ### Glancing away (e.g. at the keyboard): optional
 

@@ -233,7 +233,6 @@ class HeadMouse:
         paused = self.keys.held(self.vk["pause_hold"])
         if paused and not self.paused:
             self._events.append(Event("pause"))
-        self.paused = paused
         if self.settings.general.precision_toggle:
             if self.keys.pressed(self.vk["precision_hold"]):
                 self.precision_on = not self.precision_on
@@ -253,6 +252,7 @@ class HeadMouse:
         self._update_actions(now, dt, focused, sample.face if raw is not None else None)
         precision = precision or self.action_precision
         paused = paused or self.action_freeze
+        self.paused = paused
         if self.tracking != self._reported_tracking:
             if self.tracking == TrackingStatus.OK:
                 self._events.append(Event("tracking_ok", "Tracking OK"))
@@ -339,8 +339,9 @@ def uses_eyes(settings):
 
 
 def needs_face(settings):
-    """True when the webcam must read the face's expressions (eyes for glances, or gestures)."""
-    return uses_eyes(settings) or actions.uses_gestures(settings)
+    """True when the webcam must read the face's expressions (eyes for glances, or gestures - as soon
+    as click actions are on, so the gesture meters work before anything is assigned)."""
+    return uses_eyes(settings) or settings.actions.enabled
 
 
 def _restart_needed(old, new):
@@ -383,6 +384,7 @@ class Snapshot:
     face: dict = None              # smoothed face gesture scores (click actions)
     gestures: tuple = ()           # gestures active now
     buttons: tuple = ()            # mouse buttons HeadMouse holds down now
+    frozen_by_action: bool = False # frozen by a click action (not the freeze key)
     dry_run: bool = False
     settings: object = None
 
@@ -696,7 +698,7 @@ class Engine:
             glancing=r.glancing, gaze=r.gaze, eye_pitch=app.eye_pitch, rate=self.rate,
             practice_camera=tuple(app.practice_camera), situation=app.situation,
             face=dict(app.gestures.level), gestures=tuple(sorted(app.gestures.active)),
-            buttons=tuple(sorted(app.buttons_down)),
+            buttons=tuple(sorted(app.buttons_down)), frozen_by_action=app.action_freeze,
             settings=self.settings)
         with self._lock:
             self._snapshot = snap
