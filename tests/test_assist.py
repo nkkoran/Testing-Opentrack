@@ -1,5 +1,6 @@
 """Optional control helpers: stop when back in the middle, auto-center, vertical follow, hybrid, linking."""
 
+import random
 import unittest
 
 from headmouse import calibration, config, tuning
@@ -208,6 +209,29 @@ class HybridTests(unittest.TestCase):
             self.assertLessEqual(back, slowing + 0.01, blend)        # and stops like the joystick does
             self.assertLess(glide(ctl, 0, -2, 0.5), -5.0, blend)     # then small moves follow again
 
+    def test_small_moves_follow_again_with_real_tracking_noise(self):
+        """Webcam-like input: new samples at 30 Hz with jitter, default smoothing, 125 Hz ticks."""
+        ctl = MotionController(settings(assist={"hybrid": True}))
+        rng = random.Random(4)
+        head, sample, t = 0.0, 0.0, 0.0
+
+        def tick(target, seconds, speed=60.0):
+            nonlocal head, sample, t
+            turned = 0.0
+            for _ in range(round(seconds / DT)):
+                head += max(-speed * DT, min(speed * DT, target - head))
+                if int((t + DT) * 30) != int(t * 30):          # a new camera frame
+                    sample = head + rng.uniform(-0.15, 0.15)
+                t += DT
+                turned += ctl.step((sample, 0.0), DT).yaw_speed * DT
+            return turned
+        tick(0, 1.0)
+        tick(15, 1.0)                                              # turn right
+        tick(0, 0.5)                                               # back to the middle
+        tick(0, 1.0)                                               # rest a second
+        self.assertEqual(ctl._turned[0], 0)
+        self.assertLess(tick(-2, 1.0, speed=5.0), -4.0)            # small moves follow again
+
     def test_overshooting_center_after_a_turn_stays_still(self):
         ctl = self.ctl()
         run(ctl, 1.0, yaw=-12)
@@ -273,6 +297,17 @@ class LinkTests(unittest.TestCase):
         s = settings(assist={"vertical_follow": True})
         new, notes = tuning.propose(s, simulate_round(s, tuning.make_targets(seed=1)))
         self.assertEqual((new.up, new.down), (s.up, s.down))
+
+    def test_wizard_keeps_the_mouse_like_area(self):
+        s = settings(assist={"hybrid": True}, right={"deadzone": 5.0}, up={"deadzone": 4.0})
+        neutral = calibration.Neutral(0, 0, 0.1, 0.1)
+        moves = {"right": calibration.Movement(30, 1), "left": calibration.Movement(20, -1),
+                 "up": calibration.Movement(15, 1), "down": calibration.Movement(10, -1)}
+        new = calibration.propose(s, "webcam", neutral, moves)[0]
+        self.assertEqual((new.right.deadzone, new.up.deadzone), (5.0, 4.0))
+        self.assertGreater(new.right.full_speed_angle, new.right.deadzone)
+        plain = calibration.propose(settings(right={"deadzone": 5.0}), "webcam", neutral, moves)[0]
+        self.assertLess(plain.right.deadzone, 5.0)                 # unchanged behaviour without it
 
     def test_wizard_keeps_linked_sides_equal(self):
         s = settings(general={"link_left_right": True})

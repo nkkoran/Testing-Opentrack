@@ -12,8 +12,7 @@ from .glance import GlanceGuard
 
 FOLLOW_BACKLASH = 0.25   # degrees: head jitter smaller than this doesn't move the camera (vertical follow)
 STEADY_SPEED = 10.0      # degrees/second: auto-center only learns while the head is this still
-SETTLE_SPEED = 5.0       # degrees/second: hybrid follows again after a turn once the head is this still...
-SETTLE_TIME = 0.2        # ...for this long
+SETTLE_TIME = 0.2        # seconds: hybrid follows again after a turn once the head has been still this long
 
 
 def orient(raw, settings, offset=(0.0, 0.0)):
@@ -177,8 +176,7 @@ class MotionController:
         self._previous = None          # last corrected angles, to tell resting from moving
         self._follow_ref = [None, None]  # follow modes: head angle the camera last followed (yaw, pitch)
         self._turned = [0, 0]          # hybrid: direction of the last joystick turn, until the head settles
-        self._still = [0.0, 0.0]       # hybrid: how long the head has been still
-        self._last = [None, None]      # hybrid: previous angles, to tell still from moving
+        self._still = [0.0, 0.0]       # hybrid: how long the head has been still (within the jitter filter)
 
     def _stop(self, result):
         """Stop all movement and throw away leftover fractions of a count."""
@@ -202,7 +200,6 @@ class MotionController:
         self._follow_ref = [None, None]
         self._turned = [0, 0]
         self._still = [0.0, 0.0]
-        self._last = [None, None]
 
     def step(self, angles, dt, hold=False, precision=False, eye_pitch=None, blink=0.0):
         """Advance one tick.
@@ -287,16 +284,16 @@ class MotionController:
     def _hybrid(self, i, angle, dt, gain, axis):
         """Mouse-like inside the dead zone, joystick beyond it, blended in between."""
         stick = axis.speed(angle, dt) * (1.0 - axis.weight(angle))
-        last, self._last[i] = self._last[i], angle
-        if last is not None and dt > 0 and abs(angle - last) / dt < SETTLE_SPEED:
-            self._still[i] += dt
-        else:
-            self._still[i] = 0.0
         if axis.direction:
             self._turned[i] = axis.direction
-        elif self._turned[i] and axis.stopped_time >= axis.reverse_delay and self._still[i] >= SETTLE_TIME:
+        before = self._follow_ref[i]
+        follow = self._follow(i, angle, dt, gain, axis)
+        # still = jitter too small to move the follower (the same filter that keeps the camera still)
+        self._still[i] = self._still[i] + dt if self._follow_ref[i] == before else 0.0
+        if self._turned[i] and not axis.direction and axis.stopped_time >= axis.reverse_delay \
+                and self._still[i] >= SETTLE_TIME:
             self._turned[i] = 0  # the turn is over: small movements follow again
-        return stick + self._follow(i, angle, dt, gain, axis)
+        return stick + follow
 
     def _learn_center(self, yaw, pitch, yaw_speed, pitch_speed, dt, skip_pitch):
         """Auto-center: while resting in the dead zone, slowly move the center to the head."""

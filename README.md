@@ -197,7 +197,8 @@ turns**:
 - **Blend into turning** (2° by default): over this many degrees past the dead zone the
   mouse-like movement fades out while the joystick fades in. 0 is a sharp switch.
 - The **Dead zone** slider of each direction sets how big the mouse-like area is. Make it bigger
-  for more room. The graph shows the joystick part and the mouse-like sensitivity.
+  for more room. The graph shows the joystick part and the mouse-like sensitivity. While this is
+  on, the setup wizard and the practice game never make the dead zones smaller.
 - Coming back to the middle after a turn doesn't swing the camera back. Small moves follow
   again once your head has stopped for a moment.
 - Hold the pause key (F9) to move your head without moving the camera, like lifting a mouse.

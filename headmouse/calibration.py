@@ -8,6 +8,8 @@ then turns comfortably (2) right, (3) left, (4) up and (5) down. From that:
 * full_speed_angle = 75% of the comfortable range, so top speed never needs a strain
 * deadzone         = 20% of full_speed_angle (the ratio of the original defaults),
                      but at least 4x the tracking noise and at least 1 degree
+                     (never smaller than now with mouse-like aiming, where it is
+                     the mouse-like area the player chose)
 
 Speeds and curve shapes are left as they are - those are taste, not range.
 """
@@ -106,6 +108,9 @@ def propose(settings, source_kind, neutral, movements):
         full = min(45.0, max(5.0, round(FULL_SPEED_SHARE * m.extent, 1)))
         dead = max(DEADZONE_SHARE * full, 4 * noise, 1.0)
         dead = round(min(dead, full - 2.0), 1)
+        if settings.assist.hybrid and not (axis == 1 and settings.assist.vertical_follow) and dead < d.deadzone:
+            dead = d.deadzone                       # keep the mouse-like area
+            full = max(full, round(dead + 2.0, 1))
         new = dataclasses.replace(new, **{name: dataclasses.replace(d, deadzone=dead, full_speed_angle=full)})
         report.append(f"{name.title()}: comfortable range {m.extent:.0f}°  ->  dead zone {dead:g}°, "
                       f"full speed at {full:g}°")

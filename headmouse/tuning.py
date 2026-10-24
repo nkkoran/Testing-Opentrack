@@ -13,7 +13,7 @@ at how they reached the targets:
 With mouse-like aiming (hybrid) on, small targets (within mouse-like reach) tune
 its strength instead, and the dead zone - now the mouse-like area - is left alone:
 
-* jumpy          - overshot or wobbled off small targets        -> gentler (lower strength)
+* jumpy          - overshot past or wobbled off small targets   -> gentler (lower strength)
 * too weak       - had to turn past the area for small targets  -> stronger
 * rough hand-over - overshot big turns                          -> wider blend
 
@@ -37,7 +37,7 @@ def make_targets(seed=None, hybrid=False):
     """12 targets (relative to where the camera points when each appears): 3 per direction.
     With mouse-like aiming, one per direction is a small move (within SMALL_MOVE)."""
     rng = random.Random(seed)
-    yaws, pitches = ((8, 25, 55), (5, 10, 16)) if hybrid else ((15, 35, 60), (6, 12, 18))
+    yaws, pitches = ((7, 25, 55), (5, 10, 16)) if hybrid else ((15, 35, 60), (6, 12, 18))
     targets = []
     for side in (1, -1):
         targets += [(side * d, rng.uniform(-3, 3)) for d in yaws]
@@ -124,7 +124,8 @@ def trial_metrics(trial, settings):
     small = axis in hybrid_axes(settings) and abs(trial.target[axis]) <= SMALL_MOVE[axis]
     return {"direction": name, "time": trial.time if trial.acquired else TIMEOUT + 2.0,
             "acquired": trial.acquired, "overshoot": overshoot, "full": full, "approach": approach,
-            "exits": max(0, trial.entries - 1), "stall": stall, "joystick": joystick, "small": small}
+            "exits": max(0, trial.entries - 1), "stall": stall, "joystick": joystick, "small": small,
+            "distance": abs(trial.target[axis])}
 
 
 def worth_keeping(old_score, new_score):
@@ -146,21 +147,24 @@ def _propose_hybrid(settings, small, big_overshoot):
     for axis in hybrid_axes(settings):
         field, label = (("hybrid_gain_x", "left/right"), ("hybrid_gain_y", "up/down"))[axis]
         ms = small[axis]
-        gain = getattr(a, field)
+        old = getattr(a, field)
         if len(ms) < 2:
             continue
         mean = lambda key: statistics.fmean(m[key] for m in ms)
-        if mean("overshoot") >= 2.0 or mean("exits") >= 0.8:
-            gain = max(0.5, gain * 0.8)
-            why.append(f"small {label} moves were jumpy - gentler mouse-like aiming")
-        elif mean("joystick") >= 0.3:
-            gain = min(12.0, gain * 1.3)
-            why.append(f"small {label} moves needed a turn - stronger mouse-like aiming")
+        # how far mouse-like aiming alone can turn the camera, vs how far the small targets were
+        short = any(old * (getattr(settings, m["direction"]).deadzone + a.hybrid_blend / 2) < m["distance"]
+                    for m in ms)
+        if mean("overshoot") > RADIUS + 0.5 or mean("exits") >= 0.8:
+            gain, reason = max(0.5, old * 0.8), f"small {label} moves were jumpy - gentler mouse-like aiming"
+        elif mean("joystick") >= 0.4 or (short and mean("joystick") >= 0.1):
+            gain, reason = min(12.0, old * 1.3), f"small {label} moves needed a turn - stronger mouse-like aiming"
         elif mean("approach") >= 1.2 or mean("time") >= 2.5:
-            gain = min(12.0, gain * 1.15)
-            why.append(f"slow on small {label} moves - a bit stronger mouse-like aiming")
-        if round(gain, 1) != getattr(a, field):
+            gain, reason = min(12.0, old * 1.15), f"slow on small {label} moves - a bit stronger mouse-like aiming"
+        else:
+            continue
+        if round(gain, 1) != old:          # already at the limit: nothing to try
             changes[field] = round(gain, 1)
+            why.append(reason)
     if big_overshoot and a.hybrid_blend < 4.0:
         changes["hybrid_blend"] = a.hybrid_blend + 1.0
         why.append("overshot bigger turns - smoother hand-over from mouse-like to turning")

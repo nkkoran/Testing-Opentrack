@@ -187,6 +187,21 @@ class HybridTuningTests(unittest.TestCase):
         self.assertGreater(new.assist.hybrid_gain_x, 1.5, notes)
         config.validate(new)
 
+    def test_good_player_keeps_default_strength(self):
+        s = self.hybrid()
+        new, notes = tuning.propose(s, simulate_round(s, tuning.make_targets(seed=1, hybrid=True)))
+        self.assertEqual((new.assist.hybrid_gain_x, new.assist.hybrid_gain_y), (3.0, 3.0), notes)
+
+    def test_no_change_at_the_limit_is_not_reported(self):
+        s = self.hybrid(hybrid_gain_x=0.5, hybrid_gain_y=0.5)
+        jumpy = [tuning.Trial(t) for t in tuning.make_targets(seed=1, hybrid=True)]
+        for trial in jumpy:                                       # flew far past every target
+            trial.add(0.0, (0, 0), (0, 0), (0, 0))
+            trial.add(1.0, (trial.target[0] * 2, trial.target[1] * 2), (0, 0), (0, 0))
+        new, notes = tuning.propose(s, jumpy)
+        self.assertEqual(new.assist.hybrid_gain_x, 0.5)
+        self.assertFalse(any("gentler" in n for n in notes.get("aiming", [])), notes)
+
     def test_off_leaves_aiming_alone(self):
         s = all_dirs(config.Settings(), min_speed=30.0, curve=1.0)
         new, notes = tuning.propose(s, simulate_round(s, tuning.make_targets(seed=1)))
