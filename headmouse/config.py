@@ -74,6 +74,7 @@ class GeneralSettings:
     setup_done: bool = False
     link_left_right: bool = False   # Settings > Feel: changing one side changes the other too
     link_up_down: bool = False
+    precision_toggle: bool = False  # True: tap the precision key to switch precision aim on/off
 
 
 @dataclass
@@ -168,6 +169,12 @@ class AssistSettings:
     hybrid_blend_y: float = 2.0       # up/down (missing = same as left/right)
     mouse_delay_x: float = 0.0        # mouse-like movement from rest waits this long (s); a quick glance is ignored
     mouse_delay_y: float = 0.0
+    slow_precision_x: float = 1.0     # mouse-like: share of the sensitivity for slow head movement (1 = off)...
+    slow_precision_y: float = 1.0
+    fast_speed_x: float = 20.0        # ...rising to the full sensitivity at this head speed (degrees/second)
+    fast_speed_y: float = 20.0
+    wobble_x: float = 0.25            # mouse-like: head movement smaller than this (degrees) is ignored as jitter
+    wobble_y: float = 0.25
 
 
 @dataclass
@@ -359,9 +366,15 @@ def validate(s):
     _check(0.5 <= a.return_stop_release <= 10, "[assist] return_stop_release must be 0.5-10 degrees")
     _check(2 <= a.auto_center_seconds <= 60, "[assist] auto_center_seconds must be 2-60")
     _check(0 <= a.auto_center_limit <= 20, "[assist] auto_center_limit must be 0-20 degrees")
-    _check(0.5 <= a.vertical_follow_gain <= 20, "[assist] vertical_follow_gain must be 0.5-20")
-    _check(0.5 <= a.hybrid_gain_x <= 20 and 0.5 <= a.hybrid_gain_y <= 20,
-           "[assist] hybrid_gain_x and hybrid_gain_y must be 0.5-20")
+    _check(0.1 <= a.vertical_follow_gain <= 20, "[assist] vertical_follow_gain must be 0.1-20")
+    _check(0.1 <= a.hybrid_gain_x <= 20 and 0.1 <= a.hybrid_gain_y <= 20,
+           "[assist] hybrid_gain_x and hybrid_gain_y must be 0.1-20")
+    _check(0.1 <= a.slow_precision_x <= 1 and 0.1 <= a.slow_precision_y <= 1,
+           "[assist] slow_precision_x and slow_precision_y must be 0.1-1")
+    _check(2 <= a.fast_speed_x <= 90 and 2 <= a.fast_speed_y <= 90,
+           "[assist] fast_speed_x and fast_speed_y must be 2-90 degrees/second")
+    _check(0.05 <= a.wobble_x <= 1.5 and 0.05 <= a.wobble_y <= 1.5,
+           "[assist] wobble_x and wobble_y must be 0.05-1.5 degrees")
     _check(0 <= a.hybrid_blend <= 10 and 0 <= a.hybrid_blend_y <= 10,
            "[assist] hybrid_blend and hybrid_blend_y must be 0-10 degrees")
     _check(0 <= a.mouse_delay_x <= 2 and 0 <= a.mouse_delay_y <= 2,

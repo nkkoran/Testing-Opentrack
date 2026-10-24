@@ -190,6 +190,8 @@ def describe(snap):
     if state.startswith("CENTER"):
         return "Center your head", "Movement resumes once your head is back in the middle", "CENTER"
     if "precision" in state:
+        if s.general.precision_toggle:
+            return "Precision aim", f"Slow mode - press {k.precision_hold} again to end it", "ACTIVE"
         return "Precision aim", f"Slow mode while {k.precision_hold} is held", "ACTIVE"
     return "On", f"Hold {k.pause_hold} to freeze the camera", "ACTIVE"
 
@@ -503,7 +505,8 @@ class MainWindow:
     # --- live updates ----------------------------------------------------------
 
     def _show_keys(self, k):
-        shown = (k.enable_toggle, k.pause_hold, k.precision_hold, k.recenter)
+        toggle = self.engine.settings.general.precision_toggle
+        shown = (k.enable_toggle, k.pause_hold, k.precision_hold, k.recenter, toggle)
         if shown == self._keys_shown:
             return
         self._keys_shown = shown
@@ -511,7 +514,8 @@ class MainWindow:
             w.destroy()
         self.keys.columnconfigure((0, 1), weight=1, uniform="k")
         for i, (key, caption) in enumerate(((k.enable_toggle, "on / off"), (k.pause_hold, "hold to freeze"),
-                                            (k.precision_hold, "hold to aim slowly"), (k.recenter, "re-center"))):
+                                            (k.precision_hold, "tap: slow aim on/off" if toggle else
+                                             "hold to aim slowly"), (k.recenter, "re-center"))):
             keycap(self.keys, key, caption).grid(row=i // 2, column=i % 2, sticky="w", pady=3)
 
     def refresh(self):
@@ -612,10 +616,14 @@ class CameraWindow(Child):
 
 
 class SliderRow:
-    """Label, value chip and slider, in one row."""
+    """Label, value chip and slider, in one row. With log=True the slider is logarithmic
+    (step is then the number of steps), so small values get as much room as big ones."""
 
-    def __init__(self, parent, label, lo, hi, step, fmt, command, help_text="", chip=SUBTLE):
+    def __init__(self, parent, label, lo, hi, step, fmt, command, help_text="", chip=SUBTLE, log=False):
         self.fmt = fmt
+        self.log = (lo, hi) if log else None
+        if log:
+            lo, hi, step = 0.0, 1.0, 1.0 / step
         self.frame = ctk.CTkFrame(parent, fg_color="transparent")
         top = ctk.CTkFrame(self.frame, fg_color="transparent")
         top.pack(fill="x")
@@ -624,7 +632,8 @@ class SliderRow:
                                   text_color=TEXT, width=70, height=26)
         self.value.pack(side="right")
         if help_text:
-            ctk.CTkLabel(self.frame, text=help_text, font=font(11), text_color=MUTED, anchor="w").pack(fill="x")
+            ctk.CTkLabel(self.frame, text=help_text, font=font(11), text_color=MUTED, anchor="w", justify="left",
+                         wraplength=470).pack(fill="x")
         self.slider = ctk.CTkSlider(self.frame, from_=lo, to=hi, number_of_steps=max(1, round((hi - lo) / step)),
                                     command=self._moved, height=20, button_length=0,
                                     button_color=ACCENT, button_hover_color=ACCENT_HOVER, progress_color=ACCENT,
@@ -632,16 +641,27 @@ class SliderRow:
         self.slider.pack(fill="x", pady=(4, 0))
         self.command = command
 
-    def _moved(self, value):
+    def _to_value(self, position):
+        if self.log is None:
+            return position
+        lo, hi = self.log
+        return lo * (hi / lo) ** position
+
+    def _moved(self, position):
+        value = self._to_value(position)
         self.value.configure(text=self.fmt(value))
         self.command(value)
 
     def set(self, value):
-        self.slider.set(value)
+        position = value
+        if self.log is not None:
+            lo, hi = self.log
+            position = math.log(min(max(value, lo), hi) / lo) / math.log(hi / lo)
+        self.slider.set(position)
         self.value.configure(text=self.fmt(value))
 
     def get(self):
-        return self.slider.get()
+        return self._to_value(self.slider.get())
 
     def enable(self, on):
         self.slider.configure(state="normal" if on else "disabled")
@@ -846,9 +866,27 @@ class SettingsWindow(Child):
         self.rows["area"] = add(row("Mouse-like area", 0, 20, 0.5, deg, lambda v: self._dir_changed("deadzone", v),
                                     "How far your head can move before the joystick takes over"),
                                 mode_of("hybrid"), pady=(10, 0))
-        self.axis_rows["gain"] = add(row("Sensitivity", 0.5, 20, 0.5, lambda v: f"{v:.1f}x", self._gain_changed,
-                                         "Camera turn for each degree of head movement - lower is more precise"),
-                                     mode_of("hybrid", "follow"), pady=(10, 0))
+        self.axis_rows["gain"] = add(
+            SliderRow(box, "Sensitivity", 0.1, 10, 200, lambda v: f"{v:.2f}x" if v < 1 else f"{v:.1f}x",
+                      self._gain_changed, "Camera turn for each degree of head movement - lower is more precise",
+                      log=True), mode_of("hybrid", "follow"), pady=(10, 0))
+        self.axis_rows["slow"] = add(
+            row("Slow-movement precision", 10, 100, 5, lambda v: "off" if v >= 99.5 else f"{v:.0f}%",
+                lambda v: self._axis_changed("slow", round(v / 100, 2)),
+                "Slow head movements turn the camera only this share of the sensitivity, for fine "
+                "corrections (like mouse acceleration). 100% = off"),
+            mode_of("hybrid", "follow"), pady=(10, 0))
+        self.axis_rows["fast"] = add(
+            row("Full sensitivity from", 2, 90, 1, lambda v: f"{v:.0f}°/s",
+                lambda v: self._axis_changed("fast", round(v)),
+                "Head speed where the full sensitivity is reached, so quick moves still cover distance"),
+            lambda: self._mode() in ("hybrid", "follow") and self._axis_value("slow") < 1, pady=(10, 0))
+        self.axis_rows["wobble"] = add(
+            row("Wobble filter", 0.05, 1.5, 0.05, lambda v: f"{v:.2f}°",
+                lambda v: self._axis_changed("wobble", round(v, 2)),
+                "Head movement smaller than this is ignored. Smaller = fine corrections respond sooner; "
+                "bigger = steadier when holding still"),
+            mode_of("hybrid", "follow"), pady=(10, 0))
         self.axis_rows["mouse_delay"] = add(
             row("Start delay", 0, 1.0, 0.01, secs, lambda v: self._axis_changed("mouse_delay", round(v, 2)),
                 "Movement from rest waits this long; a quick glance that comes back sooner is ignored"),
@@ -980,6 +1018,13 @@ class SettingsWindow(Child):
                                    "is held")
         self.precision.frame.pack(fill="x", pady=(10, 0))
         self.precision.set(self.work.motion.precision_speed_factor * 100)
+        key = self.work.keys.precision_hold or "the precision key"
+        self.toggle_switch = switch(scroll, f"Tap {key} to switch precision aim on and off (instead of holding it)",
+                                    lambda: self._set("general", precision_toggle=bool(self.toggle_switch.get())),
+                                    font=font(13), text_color=TEXT)
+        if self.work.general.precision_toggle:
+            self.toggle_switch.select()
+        self.toggle_switch.pack(anchor="w", pady=(8, 0))
         self.return_switch = switch(scroll, "Stop when I come back to the middle (joystick)", lambda: self._set(
             "assist", return_stop=bool(self.return_switch.get())), font=font(14, "bold"), text_color=TEXT)
         if a.return_stop:
@@ -1054,15 +1099,24 @@ class SettingsWindow(Child):
                 return "assist", "vertical_follow_gain"
             return "assist", "hybrid_gain_x" if x else "hybrid_gain_y"
         return {"mouse_delay": ("assist", "mouse_delay_x" if x else "mouse_delay_y"),
+                "slow": ("assist", "slow_precision_x" if x else "slow_precision_y"),
+                "fast": ("assist", "fast_speed_x" if x else "fast_speed_y"),
+                "wobble": ("assist", "wobble_x" if x else "wobble_y"),
                 "blend": ("assist", "hybrid_blend" if x else "hybrid_blend_y"),
                 "steady": ("webcam", "smoothing_min_cutoff" if x else "vertical_smoothing_min_cutoff")}[name]
+
+    def _axis_value(self, name):
+        section, field = self._axis_field(name)
+        return getattr(getattr(self.work, section), field)
 
     def _axis_changed(self, name, value):
         section, field = self._axis_field(name)
         self._set(section, **{field: value})
+        if name == "slow":
+            self._relayout()   # "Full sensitivity from" only matters with slow-movement precision on
 
     def _gain_changed(self, value):
-        self._axis_changed("gain", round(value, 1))
+        self._axis_changed("gain", round(value, 2) if value < 1 else round(value, 1))
 
     def _load_axis(self):
         """Show the settings the current axis and mode use, with their current values."""
@@ -1085,8 +1139,11 @@ class SettingsWindow(Child):
             row.set(getattr(d, "deadzone" if name == "area" else name))
             row.enable(not d.points)
         for name, row in self.axis_rows.items():
-            section, field = self._axis_field(name)
-            row.set(getattr(getattr(self.work, section), field))
+            value = self._axis_value(name)
+            row.set(value * 100 if name == "slow" else value)
+        self._relayout()
+
+    def _relayout(self):
         for widget, _, _ in self._feel_items:
             widget.pack_forget()
         for widget, when, pack in self._feel_items:
@@ -1361,7 +1418,7 @@ class SettingsWindow(Child):
                      font=font(12), text_color=MUTED).pack(anchor="w", pady=(0, 6))
         self.key_buttons = {}
         for field, label in (("pause_hold", "Freeze camera (hold)"), ("enable_toggle", "Head control on/off"),
-                             ("precision_hold", "Precision aim (hold)"), ("recenter", "Re-center"),
+                             ("precision_hold", "Precision aim"), ("recenter", "Re-center"),
                              ("calibrate_turn", "Test turn (game calibration)")):
             row = ctk.CTkFrame(scroll, fg_color=SUBTLE, corner_radius=12)
             row.pack(fill="x", pady=3)

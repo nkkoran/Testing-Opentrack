@@ -359,6 +359,93 @@ class MouseDelayTests(unittest.TestCase):
         self.assertAlmostEqual(self.nod(ctl, 3.0, 0.15), 0.0)
 
 
+class PrecisionTests(unittest.TestCase):
+    """Slow-movement precision (speed-dependent sensitivity) and the wobble filter."""
+
+    def ctl(self, **assist):
+        return MotionController(settings(assist={"hybrid": True, "hybrid_gain_x": 2.0, **assist}))
+
+    def webcam_glide(self, ctl, start, end, seconds, jitter=0.15, seed=1):
+        """Webcam-like: new samples at 30 Hz with jitter, default smoothing, 125 Hz ticks."""
+        rng = random.Random(seed)
+        turned, sample, gains = 0.0, start, []
+        n = round(seconds / DT)
+        for i in range(1, n + 1):
+            if int(i * DT * 30) != int((i - 1) * DT * 30):
+                sample = start + (end - start) * i / n + rng.uniform(-jitter, jitter)
+            turned += ctl.step((sample, 0.0), DT).yaw_speed * DT
+            gains.append(ctl._precision(0))
+        return turned, gains
+
+    def test_off_by_default(self):
+        a = config.Settings().assist
+        self.assertEqual((a.slow_precision_x, a.slow_precision_y, a.wobble_x), (1.0, 1.0, 0.25))
+
+    def test_slow_moves_get_finer_fast_moves_full(self):
+        on, off = self.ctl(slow_precision_x=0.3), self.ctl()
+        slow_on, gains = self.webcam_glide(on, 0, 2.0, 2.0)          # 1 deg/s, a fine correction
+        slow_off, _ = self.webcam_glide(off, 0, 2.0, 2.0)
+        self.assertLess(slow_on, slow_off * 0.55)
+        self.assertLess(max(gains[40:]), 0.6)                          # steadily low, no flicker to full
+        totals = []
+        for ctl in (self.ctl(slow_precision_x=0.3), self.ctl()):                   # a quick flick
+            totals.append(self.webcam_glide(ctl, 0, 2.0, 0.06, jitter=0)[0] + run(ctl, 0.3, yaw=2.0)[0])
+        self.assertGreater(totals[0], totals[1] * 0.75, totals)
+
+    def test_does_not_touch_the_joystick(self):
+        on, off = self.ctl(slow_precision_x=0.2, hybrid_blend=0.0), self.ctl(hybrid_blend=0.0)
+        run(on, 0.5, yaw=12)
+        run(off, 0.5, yaw=12)
+        self.assertAlmostEqual(run(on, 1.0, yaw=12)[0], run(off, 1.0, yaw=12)[0], places=6)
+
+    def test_wobble_filter_sets_how_soon_a_reversal_responds(self):
+        for wobble, expect in ((0.1, 0.2), (0.25, 0.5)):
+            ctl = MotionController(settings(assist={"hybrid": True, "wobble_x": wobble},
+                                            motion={"smoothing_seconds": 0}))
+            glide(ctl, 0, 2, 0.3)
+            back = 0.0
+            for i in range(1, 101):                                    # reverse 0.01 deg at a time
+                if ctl.step((2 - i * 0.01, 0.0), DT).yaw_speed < 0:
+                    back = i * 0.01
+                    break
+            self.assertAlmostEqual(back, expect, delta=0.02)
+
+    def test_lower_sensitivity_values_are_allowed(self):
+        s = settings(assist={"hybrid_gain_x": 0.1, "vertical_follow_gain": 0.2})
+        self.assertEqual(s.assist.hybrid_gain_x, 0.1)
+        with self.assertRaises(config.SettingsError):
+            settings(assist={"wobble_x": 0.0})                         # 0 would never count as still
+
+    def test_precision_key_toggle(self):
+        s = settings(general={"start_enabled": True, "precision_toggle": True})
+        src, backend = FakeSource(), NullInput()
+        app = HeadMouse(s, src, backend)
+        key = s.key("precision_hold")
+        t = 0.0
+
+        def ticks(seconds):
+            nonlocal t
+            for i in range(round(seconds / DT)):
+                src.set(12.0 + 0.01 * (i % 3), 0.0, t)
+                app.tick(t)
+                t += DT
+        ticks(0.5)
+        self.assertFalse(app.precision_on)
+        backend.keys_down.add(key)
+        ticks(0.1)
+        backend.keys_down.discard(key)
+        ticks(0.3)
+        self.assertTrue(app.precision_on)                              # stays on after letting go
+        self.assertIn("precision", app.state)
+        backend.keys_down.add(key)
+        ticks(0.1)
+        backend.keys_down.discard(key)
+        ticks(0.1)
+        self.assertFalse(app.precision_on)
+        hold = settings(general={"start_enabled": True})
+        self.assertFalse(hold.general.precision_toggle)
+
+
 class CompatibilityTests(unittest.TestCase):
     """Settings saved by 1.4 must behave exactly as before."""
 

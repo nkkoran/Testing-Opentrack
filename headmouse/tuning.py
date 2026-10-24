@@ -32,6 +32,7 @@ RADIUS = 2.5      # degrees: the crosshair counts as on the target within this
 DWELL = 0.35      # seconds the crosshair must stay on the target
 TIMEOUT = 8.0     # seconds before a target counts as missed
 DIRECTIONS = ("right", "left", "up", "down")
+GAIN_LIMITS = (0.2, 8.0)  # mouse-like sensitivity the practice game may suggest
 SMALL_MOVE = (10.0, 6.0)  # degrees (left/right, up/down): with mouse-like aiming, targets this close are small moves
 
 
@@ -160,11 +161,14 @@ def _propose_hybrid(settings, small, big_overshoot):
         short = any(old * (getattr(settings, m["direction"]).deadzone + blend / 2) < m["distance"]
                     for m in ms)
         if mean("overshoot") > RADIUS + 0.5 or mean("exits") >= 0.8:
-            gain, reason = max(0.5, old * 0.8), f"small {label} moves were jumpy - gentler mouse-like aiming"
+            gain = max(GAIN_LIMITS[0], old * 0.8)
+            reason = f"small {label} moves were jumpy - gentler mouse-like aiming"
         elif mean("joystick") >= 0.4 or (short and mean("joystick") >= 0.1):
-            gain, reason = min(12.0, old * 1.3), f"small {label} moves needed a turn - stronger mouse-like aiming"
+            gain = min(GAIN_LIMITS[1], old * 1.3)
+            reason = f"small {label} moves needed a turn - stronger mouse-like aiming"
         elif mean("approach") >= 1.2 or mean("time") >= 2.5:
-            gain, reason = min(12.0, old * 1.15), f"slow on small {label} moves - a bit stronger mouse-like aiming"
+            gain = min(GAIN_LIMITS[1], old * 1.15)
+            reason = f"slow on small {label} moves - a bit stronger mouse-like aiming"
         else:
             continue
         if round(gain, 1) != old:          # already at the limit: nothing to try

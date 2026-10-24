@@ -188,7 +188,10 @@ the sliders change.
 | Section | Setting | What it does | Range |
 |---|---|---|---|
 | Mouse-like movement | Mouse-like area | How far your head can move before the joystick takes over (per side) | 0–20° |
-| | Sensitivity | Camera degrees per degree of head movement. Lower = more precise | 0.5–20× |
+| | Sensitivity | Camera degrees per degree of head movement. Lower = more precise. The slider gives the low values the most room | 0.1–10× |
+| | Slow-movement precision | Slow head movements turn the camera only this share of the sensitivity (like mouse acceleration), so small corrections are finer. 100% = off | 10–100% |
+| | Full sensitivity from | Head speed where the full sensitivity is reached, so quick moves still cover distance | 2–90°/s |
+| | Wobble filter | Head movement smaller than this is ignored as jitter. Smaller = fine corrections (and changes of direction) respond sooner; bigger = steadier when holding still | 0.05–1.5° |
 | | Start delay | A movement from rest waits this long, then the camera catches up. A quick glance that comes back sooner is ignored | 0–1 s |
 | Joystick turning | Dead zone *(Joystick mode)* | How far you can move before turning starts (per side) | 0–20° |
 | | Blend from mouse-like *(Mouse + joystick)* | Over this many degrees past the mouse-like area, mouse-like movement fades out while turning fades in. 0 = sharp switch | 0–10° |
@@ -202,13 +205,25 @@ the sliders change.
 The two **Start delay** settings are separate on purpose. The mouse-like one protects small
 aiming from glances; the joystick one stops quick glances past the edge from turning the camera.
 
+**Aiming precisely.** A head can't hold as still as a hand, and webcam tracking wobbles by a few
+tenths of a degree, so small aiming is about making slow, small head movements turn the camera
+very little while quick moves still go far. Try, one at a time:
+1. **Mouse + joystick**, with a lower **Sensitivity** (try 1× or below).
+2. **Slow-movement precision** around 40%.
+3. **Wobble filter** around 0.15°, if small corrections feel sticky (raise it if aim shakes).
+4. **Precision aim** (F7, or tap mode) for shots that need it.
+5. A bigger **Mouse-like area**, so the joystick doesn't take over during fine aiming.
+6. Good, even light on the face makes the webcam wobble less than any setting can.
+
 **Too smooth or slow to respond?** Try these one at a time: move **Steadiness** right, lower
 **Curve**, lower **Blend from mouse-like**, raise **Sensitivity**.
 **Too jumpy?** The other way round.
 
 **4. For all directions** (further down, each off until switched on):
 
-- **Precision aim speed:** camera speed while the precision key (F7) is held.
+- **Precision aim speed:** camera speed while the precision key (F7) is held. Switch on **Tap F7
+  to switch precision aim on and off** if holding a key is awkward: a falling beep means precision
+  aim is on, a rising beep means it's off. It works in every mode.
 - **Stop when I come back to the middle (joystick).** After a joystick turn, once the head is back
   near the middle (even slightly past it), the camera stays still until the head clearly turns
   again: **Turn again by** degrees away from where it came to rest. Stops slow creeping.

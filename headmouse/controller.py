@@ -11,7 +11,8 @@ from .config import axis_modes
 from .curves import DirectionCurve
 from .glance import GlanceGuard
 
-FOLLOW_BACKLASH = 0.25   # degrees: head jitter smaller than this doesn't move the camera (vertical follow)
+SPEED_RISE = 0.02        # seconds: the head speed estimate (slow-movement precision) catches up with a quick
+SPEED_FALL = 0.15        # move fast, and settles slowly, so tracker jitter doesn't make it flicker
 STEADY_SPEED = 10.0      # degrees/second: auto-center only learns while the head is this still
 SETTLE_TIME = 0.2        # seconds: hybrid follows again after a turn once the head has been still this long
 TURN_TRAVEL = 0.2        # camera degrees: once the joystick has turned this much, coming back won't swing back
@@ -179,6 +180,8 @@ class MotionController:
         self.drift = [0.0, 0.0]        # auto-center: learned shift of the resting position
         self._previous = None          # last corrected angles, to tell resting from moving
         self._follow_ref = [None, None]  # follow modes: head angle the camera last followed (yaw, pitch)
+        self.head_speed = 0.0          # smoothed head speed, degrees/second (slow-movement precision)
+        self._speed_from = None        # previous smoothed angles, for head_speed
         self._turned = [0, 0]          # hybrid: direction of the last joystick turn, until the head settles
         self._travel = [0.0, 0.0]      # hybrid: camera degrees the joystick has turned in this turn
         self._still = [0.0, 0.0]       # hybrid: how long the head has been still (within the jitter filter)
@@ -203,7 +206,7 @@ class MotionController:
     def recentered(self):
         """The neutral position changed: start over from wherever the head is now."""
         self.drift = [0.0, 0.0]
-        self._smoothed = None   # the old smoothed angle would look like the head moving
+        self._smoothed = self._speed_from = None   # the old angles would look like the head moving
         self.reset_follow()
 
     def reset_follow(self):
@@ -230,7 +233,7 @@ class MotionController:
         blink     -- how closed the eyes are (0-1)
         """
         if angles is None:
-            self._smoothed = None
+            self._smoothed = self._speed_from = None
             self.glance.update(None, dt)
             return self._stop(StepResult())
 
@@ -241,6 +244,7 @@ class MotionController:
             a = 1.0 - math.exp(-dt / tau)
             self._smoothed = tuple(p + a * (n - p) for p, n in zip(self._smoothed, angles))
         yaw, pitch = self._smoothed[0] - self.drift[0], self._smoothed[1] - self.drift[1]
+        self._measure_speed(dt)
         result = StepResult(yaw=yaw, pitch=pitch)
         result.glancing = self.glance.update((yaw, pitch), dt, eye_pitch, blink)
         result.gaze = self.glance.gaze
@@ -282,6 +286,21 @@ class MotionController:
                                               vertical * pitch_speed * self.counts_per_degree_y * dt)
         return result
 
+    def _measure_speed(self, dt):
+        """Head speed in any direction, averaged so 30 Hz tracker steps don't make it flicker."""
+        last, self._speed_from = self._speed_from, self._smoothed
+        if last is None or dt <= 0:
+            return
+        now = math.hypot(self._smoothed[0] - last[0], self._smoothed[1] - last[1]) / dt
+        tau = SPEED_RISE if now > self.head_speed else SPEED_FALL
+        self.head_speed += (now - self.head_speed) * (1.0 - math.exp(-dt / tau))
+
+    def _precision(self, i):
+        """Slow-movement precision: share of the sensitivity at the current head speed."""
+        a = self.s.assist
+        slow, fast = (a.slow_precision_x, a.fast_speed_x) if i == 0 else (a.slow_precision_y, a.fast_speed_y)
+        return slow + (1.0 - slow) * min(1.0, self.head_speed / fast)
+
     def _follow(self, i, angle, dt, gain, axis=None):
         """Camera speed that turns the camera gain x the head's movement (like a mouse).
 
@@ -292,8 +311,10 @@ class MotionController:
         if ref is None or dt <= 0:
             self._follow_ref[i] = angle
             return 0.0
-        new = min(max(ref, angle - FOLLOW_BACKLASH), angle + FOLLOW_BACKLASH)  # ignores tiny jitter
+        wobble = self.s.assist.wobble_x if i == 0 else self.s.assist.wobble_y
+        new = min(max(ref, angle - wobble), angle + wobble)  # ignores tiny jitter
         self._follow_ref[i] = new
+        gain *= self._precision(i)
         if axis is None:
             moved = (new - ref) * gain
         elif self._turned[i] and (new - ref) * self._turned[i] < 0:

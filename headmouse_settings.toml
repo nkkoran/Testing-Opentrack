@@ -158,6 +158,20 @@ hybrid_blend_y = 2.0
 # The joystick has its own start_delay for each direction.
 mouse_delay_x = 0.0
 mouse_delay_y = 0.0
+# Slow-movement precision (both mouse-like modes), like mouse acceleration:
+# slow head movements turn the camera slow_precision times the sensitivity
+# (1.0 = off, 0.4 = 40%), rising to the full sensitivity at fast_speed
+# degrees/second of head movement. Makes small corrections finer while quick
+# moves still cover distance.
+slow_precision_x = 1.0
+slow_precision_y = 1.0
+fast_speed_x = 20.0
+fast_speed_y = 20.0
+# Wobble filter (both mouse-like modes): head movement smaller than this many
+# degrees is ignored as tracking jitter. Smaller = fine corrections respond
+# sooner (also when changing direction); bigger = steadier when holding still.
+wobble_x = 0.25
+wobble_y = 0.25
 
 
 # -----------------------------------------------------------------------------
@@ -260,6 +274,9 @@ setup_done = false
 # Settings > Feel: true = changing right also changes left (and the other way round).
 link_left_right = false
 link_up_down = false
+# Precision key: false = hold it for precision aim; true = tap it to switch
+# precision aim on, tap again to switch it off (a beep tells you which).
+precision_toggle = false
 
 
 # -----------------------------------------------------------------------------

@@ -77,9 +77,11 @@ def _load_or_exit(path, console):
 
 def _key_help(settings):
     k = settings.keys
+    precision = "TAP for precision (slow) aiming on/off" if settings.general.precision_toggle \
+        else "HOLD for precision (slow) aiming"
     return (f"  {k.enable_toggle:<6} turn head control on/off\n"
             f"  {k.pause_hold:<6} HOLD to freeze the camera (release to resume)\n"
-            f"  {k.precision_hold:<6} HOLD for precision (slow) aiming\n"
+            f"  {k.precision_hold:<6} {precision}\n"
             f"  {k.recenter:<6} re-center (look straight at the screen first)\n"
             f"  Ctrl+C (in this window) to quit")
 

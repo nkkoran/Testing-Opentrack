@@ -75,6 +75,7 @@ class HeadMouse:
         self._focus_candidate = None
         self._focus_since = 0.0
         self.paused = False
+        self.precision_on = False   # precision key in toggle mode
         self.settings = None
         self._events = []
         self._last_tick = None
@@ -99,6 +100,7 @@ class HeadMouse:
     def set_enabled(self, value):
         if value != self.enabled:
             self.enabled = value
+            self.precision_on = False   # always start without precision aim
             self._events.append(Event("enabled", "Head control ON") if value
                                 else Event("disabled", "Head control OFF"))
 
@@ -143,7 +145,14 @@ class HeadMouse:
         if paused and not self.paused:
             self._events.append(Event("pause"))
         self.paused = paused
-        precision = self.keys.held(self.vk["precision_hold"])
+        if self.settings.general.precision_toggle:
+            if self.keys.pressed(self.vk["precision_hold"]):
+                self.precision_on = not self.precision_on
+                self._events.append(Event("precision_on", "Precision aim ON") if self.precision_on
+                                    else Event("precision_off", "Precision aim OFF"))
+            precision = self.precision_on
+        else:
+            precision = self.keys.held(self.vk["precision_hold"])
 
         sample = self.source.latest()
         self.tracking, raw = self.monitor.check(sample, now)
@@ -510,7 +519,7 @@ class Engine:
 
     def _handle(self, event):
         self._message(event.kind, event.text)
-        if event.kind in ("enabled", "disabled", "pause"):
+        if event.kind in ("enabled", "disabled", "pause", "precision_on", "precision_off"):
             self._sounds.play(event.kind)
         elif event.kind == "tracking_lost":
             # Movement stops at once, but only beep if it lasts (games can briefly starve the camera).

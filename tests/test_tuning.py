@@ -193,13 +193,13 @@ class HybridTuningTests(unittest.TestCase):
         self.assertEqual((new.assist.hybrid_gain_x, new.assist.hybrid_gain_y), (3.0, 3.0), notes)
 
     def test_no_change_at_the_limit_is_not_reported(self):
-        s = self.hybrid(hybrid_gain_x=0.5, hybrid_gain_y=0.5)
+        s = self.hybrid(hybrid_gain_x=tuning.GAIN_LIMITS[0], hybrid_gain_y=tuning.GAIN_LIMITS[0])
         jumpy = [tuning.Trial(t) for t in tuning.make_targets(seed=1, hybrid=True)]
         for trial in jumpy:                                       # flew far past every target
             trial.add(0.0, (0, 0), (0, 0), (0, 0))
             trial.add(1.0, (trial.target[0] * 2, trial.target[1] * 2), (0, 0), (0, 0))
         new, notes = tuning.propose(s, jumpy)
-        self.assertEqual(new.assist.hybrid_gain_x, 0.5)
+        self.assertEqual(new.assist.hybrid_gain_x, tuning.GAIN_LIMITS[0])
         self.assertFalse(any("gentler" in n for n in notes.get("aiming", [])), notes)
 
     def test_off_leaves_aiming_alone(self):
