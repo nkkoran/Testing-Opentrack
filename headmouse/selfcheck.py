@@ -41,6 +41,13 @@ def run(base_dir, settings_path, report_path=""):
         root.destroy()
         return f"customtkinter {ctk.__version__}"
 
+    def program_parts():
+        from . import actions, config, gui, guide, practice, quickfix, situations
+        parts = (actions, gui, guide, practice, quickfix, situations)   # all must be in the program
+        block = practice.Checkup(config.Settings(), focus="aim", seed=1).next_block()
+        fixes = quickfix.available(config.Settings(), "x")
+        return f"{len(parts)} parts, practice block of {len(block.targets)} targets, {len(fixes)} quick fixes"
+
     def face_tracking():
         import numpy as np
         import mediapipe as mp
@@ -78,7 +85,7 @@ def run(base_dir, settings_path, report_path=""):
         from .sounds import CUES, tone_wav
         return f"{sum(len(tone_wav(parts, 0.5)) for parts in CUES.values())} bytes of tones"
 
-    for name, fn in (("version", version), ("settings", settings), ("window", window),
+    for name, fn in (("version", version), ("settings", settings), ("window", window), ("program parts", program_parts),
                      ("face tracking", face_tracking), ("camera library", camera_library),
                      ("mouse and keys", mouse_and_keys), ("sounds", sounds)):
         check(name, fn)
