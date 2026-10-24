@@ -896,7 +896,34 @@ class SettingsWindow(Child):
             ctk.CTkLabel(scroll, text=text, font=font(15, "bold"), text_color=TEXT).pack(anchor="w"),
             ctk.CTkLabel(scroll, text=sub, font=font(11), text_color=MUTED, wraplength=470,
                          justify="left").pack(anchor="w"))
-        heading("Steadier control", "Optional helpers - each one is off until you switch it on.")
+        heading("Precise aiming", "Optional helpers - each one is off until you switch it on.")
+        self.hybrid_switch = switch(scroll, "Mouse-like for small moves, joystick for big turns", self._hybrid_toggled,
+                                    font=font(14, "bold"), text_color=TEXT)
+        if a.hybrid:
+            self.hybrid_switch.select()
+        self.hybrid_switch.pack(anchor="w", pady=(8, 0))
+        ctk.CTkLabel(scroll, text="Small head movements move the camera like a mouse - it goes exactly as far as you "
+                                  "move and stays there, for very precise aiming. Turn your head further and it "
+                                  "spins like a joystick, as now. The Dead zone (above) sets how big the mouse-like "
+                                  "area is in each direction - make it bigger for more room.",
+                     font=font(11), text_color=MUTED, wraplength=470, justify="left").pack(anchor="w")
+        self.hybrid_rows = {
+            "hybrid_gain_x": SliderRow(scroll, "Left/right sensitivity", 0.5, 12, 0.5, lambda v: f"{v:.1f}x",
+                                       lambda v: self._set("assist", hybrid_gain_x=round(v, 1)),
+                                       "Camera turn for each degree of head turn (lower = more precise)"),
+            "hybrid_gain_y": SliderRow(scroll, "Up/down sensitivity", 0.5, 12, 0.5, lambda v: f"{v:.1f}x",
+                                       lambda v: self._set("assist", hybrid_gain_y=round(v, 1)),
+                                       "Camera tilt for each degree of head tilt"),
+            "hybrid_blend": SliderRow(scroll, "Blend into turning", 0, 6, 0.5, lambda v: f"{v:.1f}°",
+                                      lambda v: self._set("assist", hybrid_blend=round(v, 1)),
+                                      "0 = sharp switch at the dead zone edge; more = smoother hand-over"),
+        }
+        for field, row in self.hybrid_rows.items():
+            row.frame.pack(fill="x", pady=(8, 0))
+            row.set(getattr(a, field))
+        ctk.CTkLabel(scroll, text="The practice game (top of this tab) can tune these for you.",
+                     font=font(11), text_color=MUTED, wraplength=470, justify="left").pack(anchor="w", pady=(6, 0))
+        heading("Steadier control", "Also optional, and they work together with the other helpers.")
         self.return_switch = switch(scroll, "Stop when I come back to the middle", lambda: self._set(
             "assist", return_stop=bool(self.return_switch.get())), font=font(14, "bold"), text_color=TEXT)
         if a.return_stop:
@@ -933,6 +960,9 @@ class SettingsWindow(Child):
                                   "Camera tilt for each degree of head tilt")
         self.gain_row.frame.pack(fill="x", pady=(8, 0))
         self.gain_row.set(a.vertical_follow_gain)
+
+    def _hybrid_toggled(self):
+        self._set("assist", hybrid=bool(self.hybrid_switch.get()))
 
     def _follow_toggled(self):
         self._set("assist", vertical_follow=bool(self.follow_switch.get()))
@@ -1032,12 +1062,25 @@ class SettingsWindow(Child):
             c.create_line(left, py(v), w - 12 * k, py(v), fill=pick(BORDER))
             c.create_text(left - 6 * k, py(v), text=f"{v:.0f}", anchor="e", fill=muted, font=(FAMILY, 9))
         c.create_rectangle(left, top, px(d.deadzone), bottom, fill=pick(ZONE), outline="")
+        assist = self.work.assist
+        hybrid = assist.hybrid and not (assist.vertical_follow and self.direction in ("up", "down"))
+
+        def fade(a):  # mouse-like aiming: the joystick only fades in past the dead zone
+            if not hybrid:
+                return 1.0
+            if assist.hybrid_blend <= 0:
+                return float(a > d.deadzone)
+            return min(1.0, max(0.0, (a - d.deadzone) / assist.hybrid_blend))
         pts = []
         for i in range(161):
             a = x_max * i / 160
-            pts += [px(a), py(curve.speed(a))]
+            pts += [px(a), py(curve.speed(a) * fade(a))]
         c.create_line(*pts, fill=pick(ACCENT), width=3, smooth=True)
         c.create_text(left + 6 * k, top, text="camera °/s", anchor="nw", fill=muted, font=(FAMILY, 9))
+        if hybrid:
+            gain = assist.hybrid_gain_x if self.direction in ("right", "left") else assist.hybrid_gain_y
+            c.create_text(left + 6 * k, top + 14 * k, text=f"mouse-like ×{gain:g}", anchor="nw",
+                          fill=pick(TEXT), font=(FAMILY, 9, "bold"))
         if self.work.assist.vertical_follow and self.direction in ("up", "down"):
             c.create_rectangle(0, 0, w, h, fill=bg, outline="")
             c.create_text(w / 2, h / 2, text="Up/down follows your head like a mouse.\n"
@@ -1048,7 +1091,7 @@ class SettingsWindow(Child):
             value = {"right": snap.yaw, "left": -snap.yaw, "up": snap.pitch, "down": -snap.pitch}[self.direction]
             if value > 0:
                 a = min(value, x_max)
-                x, y, r = px(a), py(curve.speed(a)), 7 * k
+                x, y, r = px(a), py(curve.speed(a) * fade(a)), 7 * k
                 c.create_oval(x - r, y - r, x + r, y + r, fill=pick(DANGER), outline=bg, width=2)
 
     # --- Tracking ------------------------------------------------------------
@@ -1765,7 +1808,7 @@ class PracticeWindow(Child):
 
     def start_round(self):
         self.round += 1
-        self.targets = tuning.make_targets()
+        self.targets = tuning.make_targets(hybrid=self.original.assist.hybrid)
         self.trials = []
         self.trial = None
         self.next_at = time.monotonic() + 0.8
@@ -1826,6 +1869,13 @@ class PracticeWindow(Child):
                                         ("min_speed", "slowest"), ("max_speed", "top speed"), ("curve", "curve"))
                        if getattr(o, f) != getattr(n, f)]
             lines.append(f"{name.title()}: {'; '.join(self.notes[name])}" + (f"  ({', '.join(changes)})" if changes else ""))
+        if "aiming" in self.notes:
+            o, n = self.original.assist, self.proposal.assist
+            changes = [f"{label} {getattr(o, f):g} → {getattr(n, f):g}"
+                       for f, label in (("hybrid_gain_x", "left/right sensitivity"),
+                                        ("hybrid_gain_y", "up/down sensitivity"), ("hybrid_blend", "blend"))
+                       if getattr(o, f) != getattr(n, f)]
+            lines.append(f"Mouse-like aiming: {'; '.join(self.notes['aiming'])}  ({', '.join(changes)})")
         self.heading.configure(text="The new settings worked better" if better else "Your old settings did better")
         self.text.configure(text="\n".join(lines))
         self.status.configure(text="")

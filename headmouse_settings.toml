@@ -136,6 +136,17 @@ auto_center_limit = 6.0
 # like a joystick.
 vertical_follow = false
 vertical_follow_gain = 4.0
+# Mouse-like aiming for small moves: inside each direction's dead zone the
+# camera follows your head like a mouse (hybrid_gain_x / hybrid_gain_y camera
+# degrees per degree of head movement) and stays where you leave it. Turn
+# further and it works like a joystick as usual. Over hybrid_blend degrees past
+# the dead zone one fades into the other (0 = a sharp switch). The dead zone
+# sliders set how big the mouse-like area is. If vertical_follow is on, up/down
+# follows your head everywhere instead.
+hybrid = false
+hybrid_gain_x = 3.0
+hybrid_gain_y = 3.0
+hybrid_blend = 2.0
 
 
 # -----------------------------------------------------------------------------

@@ -139,6 +139,10 @@ green. The mouse is not moved and head control doesn't need to be on.
   reach the targets in each direction: overshooting, creeping up slowly, holding full tilt for a
   long time, or drifting off the target.
 - **Round 2** tries adjusted settings (small, bounded changes).
+- With **mouse-like aiming** switched on (see Precise aiming below), one target per direction is a
+  small move. Those tune the mouse-like sensitivity (gentler if small moves were jumpy, stronger
+  if you had to turn past the mouse-like area to reach them), and overshooting big turns widens the
+  blend. The dead zones are left alone, because they set the size of the mouse-like area.
 - At the end it shows both times and exactly what changed. **Nothing is kept unless you press
   "Use the new settings"**, and the old settings are backed up even then. If your settings already
   suit you, it says so and changes nothing.
@@ -178,9 +182,31 @@ with a red dot where your head is right now.
 direction match and follow every change, including in the setup wizard and the practice game.
 **Precision aim speed** sets how slow precision mode is.
 
+### Precise aiming: mouse-like for small moves (optional)
+
+Further down **Settings → Feel**. Switch on **Mouse-like for small moves, joystick for big
+turns**:
+
+- **Inside the dead zone** the camera follows your head like a mouse: it moves exactly as far as
+  your head does (times the sensitivity) and stays there when you stop. Very small, precise
+  aiming, and no drift.
+- **Further out** it spins like a joystick, exactly as before, so you can still turn all the
+  way around.
+- **Left/right sensitivity** and **Up/down sensitivity** (3× by default): camera degrees for
+  each degree of head movement. Lower is more precise.
+- **Blend into turning** (2° by default): over this many degrees past the dead zone the
+  mouse-like movement fades out while the joystick fades in. 0 is a sharp switch.
+- The **Dead zone** slider of each direction sets how big the mouse-like area is. Make it bigger
+  for more room. The graph shows the joystick part and the mouse-like sensitivity.
+- Coming back to the middle after a turn doesn't swing the camera back. Small moves follow
+  again once your head has stopped for a moment.
+- Hold the pause key (F9) to move your head without moving the camera, like lifting a mouse.
+- If **Up/down follows my head** is also on, up/down follows your head everywhere and this
+  applies to left/right only.
+
 ### Steadier control (optional)
 
-Further down **Settings → Feel**. Each helper is off until switched on.
+Each helper is off until switched on, and they all work together with mouse-like aiming.
 
 - **Stop when I come back to the middle.** After a turn, once the head is back near the middle
   (even slightly past it), the camera stays still until the head clearly turns again: **Turn

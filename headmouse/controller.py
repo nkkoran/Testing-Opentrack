@@ -12,6 +12,8 @@ from .glance import GlanceGuard
 
 FOLLOW_BACKLASH = 0.25   # degrees: head jitter smaller than this doesn't move the camera (vertical follow)
 STEADY_SPEED = 10.0      # degrees/second: auto-center only learns while the head is this still
+SETTLE_SPEED = 5.0       # degrees/second: hybrid follows again after a turn once the head is this still...
+SETTLE_TIME = 0.2        # ...for this long
 
 
 def orient(raw, settings, offset=(0.0, 0.0)):
@@ -37,15 +39,20 @@ class AxisMotion:
     With `return_stop`, coming back to the middle after a turn locks the axis:
     it stays still until the head moves `release` degrees away from where it came
     to rest (and past the dead zone), so resting slightly off center can't creep.
+
+    `blend` (hybrid mode) is how many degrees past the dead zone mouse-like
+    following fades out while the joystick fades in.
     """
 
-    def __init__(self, positive, negative, hysteresis, reverse_delay, return_stop=False, release=2.5):
+    def __init__(self, positive, negative, hysteresis, reverse_delay, return_stop=False, release=2.5,
+                 blend=0.0):
         self.positive = positive
         self.negative = negative
         self.hysteresis = hysteresis
         self.reverse_delay = reverse_delay
         self.return_stop = return_stop
         self.release = release
+        self.blend = blend
         self.reset()
 
     def reset(self):
@@ -62,6 +69,25 @@ class AxisMotion:
 
     def _clamp_to_deadzone(self, angle):
         return max(-self.negative.deadzone, min(self.positive.deadzone, angle))
+
+    def weight(self, angle):
+        """Hybrid: how much head movement here is followed like a mouse (1 in the dead zone, fading to 0)."""
+        over = abs(angle) - (self.positive if angle >= 0 else self.negative).deadzone
+        if over <= 0:
+            return 1.0
+        if over >= self.blend:
+            return 0.0
+        return 1.0 - over / self.blend
+
+    def follow_position(self, angle):
+        """Hybrid: the weight added up from 0 to angle, i.e. where following puts the camera (per unit gain)."""
+        dz = (self.positive if angle >= 0 else self.negative).deadzone
+        over = abs(angle) - dz
+        if over <= 0:
+            return angle
+        over = min(over, self.blend)
+        fade = over * over / (2 * self.blend) if self.blend > 0 else 0.0
+        return math.copysign(dz + over - fade, angle)
 
     def speed(self, angle, dt):
         """Signed camera speed in degrees/second for this tick."""
@@ -136,10 +162,10 @@ class MotionController:
         m, a = settings.motion, settings.assist
         self.yaw_axis = AxisMotion(DirectionCurve(settings.right), DirectionCurve(settings.left),
                                    m.deadzone_hysteresis, m.reverse_delay_seconds,
-                                   a.return_stop, a.return_stop_release)
+                                   a.return_stop, a.return_stop_release, a.hybrid_blend)
         self.pitch_axis = AxisMotion(DirectionCurve(settings.up), DirectionCurve(settings.down),
                                      m.deadzone_hysteresis, m.reverse_delay_seconds,
-                                     a.return_stop, a.return_stop_release)
+                                     a.return_stop, a.return_stop_release, a.hybrid_blend)
         self.counts_per_degree_x = settings.mouse.counts_per_360 / 360.0
         self.counts_per_degree_y = self.counts_per_degree_x * settings.mouse.vertical_scale
         self.glance = GlanceGuard(settings)
@@ -149,18 +175,34 @@ class MotionController:
         self._need_center = False
         self.drift = [0.0, 0.0]        # auto-center: learned shift of the resting position
         self._previous = None          # last corrected angles, to tell resting from moving
-        self._follow_ref = None        # vertical follow: head pitch the camera last followed
+        self._follow_ref = [None, None]  # follow modes: head angle the camera last followed (yaw, pitch)
+        self._turned = [0, 0]          # hybrid: direction of the last joystick turn, until the head settles
+        self._still = [0.0, 0.0]       # hybrid: how long the head has been still
+        self._last = [None, None]      # hybrid: previous angles, to tell still from moving
 
     def _stop(self, result):
         """Stop all movement and throw away leftover fractions of a count."""
         self._acc_x = self._acc_y = 0.0
-        self._follow_ref = None  # vertical follow picks up from wherever the head is next
+        self.reset_follow()  # follow modes pick up from wherever the head is next
         self.yaw_axis.reset()
         self.pitch_axis.reset()
         if self.s.motion.require_center_to_resume:
             self._need_center = True
         result.waiting_for_center = self._need_center
         return result
+
+    def recentered(self):
+        """The neutral position changed: start over from wherever the head is now."""
+        self.drift = [0.0, 0.0]
+        self._smoothed = None   # the old smoothed angle would look like the head moving
+        self.reset_follow()
+
+    def reset_follow(self):
+        """Forget where the head was, so the next tick can't jump (after pause, re-center...)."""
+        self._follow_ref = [None, None]
+        self._turned = [0, 0]
+        self._still = [0.0, 0.0]
+        self._last = [None, None]
 
     def step(self, angles, dt, hold=False, precision=False, eye_pitch=None, blink=0.0):
         """Advance one tick.
@@ -198,10 +240,19 @@ class MotionController:
                 result.waiting_for_center = True
                 return result
 
-        follow = self.s.assist.vertical_follow
-        yaw_speed = self.yaw_axis.speed(yaw, dt)
-        pitch_speed = self._follow(pitch, dt) if follow else self.pitch_axis.speed(pitch, dt)
-        if self.s.assist.auto_center:
+        a = self.s.assist
+        follow = a.vertical_follow
+        if a.hybrid:
+            yaw_speed = self._hybrid(0, yaw, dt, a.hybrid_gain_x, self.yaw_axis)
+        else:
+            yaw_speed = self.yaw_axis.speed(yaw, dt)
+        if follow:
+            pitch_speed = self._follow(1, pitch, dt, a.vertical_follow_gain)
+        elif a.hybrid:
+            pitch_speed = self._hybrid(1, pitch, dt, a.hybrid_gain_y, self.pitch_axis)
+        else:
+            pitch_speed = self.pitch_axis.speed(pitch, dt)
+        if a.auto_center:
             self._learn_center(yaw, pitch, yaw_speed, 0.0 if follow else pitch_speed, dt, follow)
         if precision:
             yaw_speed *= self.s.motion.precision_speed_factor
@@ -215,15 +266,37 @@ class MotionController:
                                               vertical * pitch_speed * self.counts_per_degree_y * dt)
         return result
 
-    def _follow(self, pitch, dt):
-        """Vertical follow: camera speed that turns the camera gain x the head's tilt change."""
-        if self._follow_ref is None or dt <= 0:
-            self._follow_ref = pitch
+    def _follow(self, i, angle, dt, gain, axis=None):
+        """Camera speed that turns the camera gain x the head's movement (like a mouse).
+
+        With an axis (hybrid), only movement inside its dead zone counts, fading out
+        over the blend band, and coming back from a joystick turn doesn't count.
+        """
+        ref = self._follow_ref[i]
+        if ref is None or dt <= 0:
+            self._follow_ref[i] = angle
             return 0.0
-        ref = self._follow_ref
-        new = min(max(ref, pitch - FOLLOW_BACKLASH), pitch + FOLLOW_BACKLASH)  # ignores tiny jitter
-        self._follow_ref = new
-        return (new - ref) * self.s.assist.vertical_follow_gain / dt
+        new = min(max(ref, angle - FOLLOW_BACKLASH), angle + FOLLOW_BACKLASH)  # ignores tiny jitter
+        self._follow_ref[i] = new
+        if axis is None:
+            return (new - ref) * gain / dt
+        if self._turned[i] and (new - ref) * self._turned[i] < 0:
+            return 0.0  # heading back after a turn: don't swing the camera back
+        return (axis.follow_position(new) - axis.follow_position(ref)) * gain / dt
+
+    def _hybrid(self, i, angle, dt, gain, axis):
+        """Mouse-like inside the dead zone, joystick beyond it, blended in between."""
+        stick = axis.speed(angle, dt) * (1.0 - axis.weight(angle))
+        last, self._last[i] = self._last[i], angle
+        if last is not None and dt > 0 and abs(angle - last) / dt < SETTLE_SPEED:
+            self._still[i] += dt
+        else:
+            self._still[i] = 0.0
+        if axis.direction:
+            self._turned[i] = axis.direction
+        elif self._turned[i] and axis.stopped_time >= axis.reverse_delay and self._still[i] >= SETTLE_TIME:
+            self._turned[i] = 0  # the turn is over: small movements follow again
+        return stick + self._follow(i, angle, dt, gain, axis)
 
     def _learn_center(self, yaw, pitch, yaw_speed, pitch_speed, dt, skip_pitch):
         """Auto-center: while resting in the dead zone, slowly move the center to the head."""
@@ -238,7 +311,10 @@ class MotionController:
                 continue
             steady = abs(angle - previous[i]) / dt < STEADY_SPEED
             if speed == 0 and steady and axis.in_deadzone(angle):
-                self.drift[i] = max(-a.auto_center_limit, min(a.auto_center_limit, self.drift[i] + angle * rate))
+                old = self.drift[i]
+                self.drift[i] = max(-a.auto_center_limit, min(a.auto_center_limit, old + angle * rate))
+                if self._follow_ref[i] is not None:
+                    self._follow_ref[i] -= self.drift[i] - old  # the center moved, not the head
 
     def _counts(self, acc, speed, amount):
         """Whole counts to send now, plus the fraction carried to the next tick."""

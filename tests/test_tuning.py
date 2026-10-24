@@ -10,10 +10,18 @@ from headmouse.controller import MotionController
 DT = 1 / 125
 
 
-def simulate_round(settings, targets, reaction=0.15, lag=0.12, gain=0.5, anticipate=0.35, reach=(20.0, 13.0)):
+def simulate_round(settings, targets, reaction=0.15, lag=0.12, gain=0.5, anticipate=0.35, reach=(20.0, 13.0),
+                   belief=None, rate=2.5):
     """A simple human model: aims the head in proportion to the error, after a reaction delay,
-    easing off as the camera swings toward the target (anticipation)."""
+    easing off as the camera swings toward the target (anticipation).
+
+    With mouse-like aiming, small errors (within what the player believes the mouse-like
+    area reaches, from `belief` = the strength they think it has) are fixed by nudging the
+    head by error / belief at `rate` per second, starting from the middle."""
     ctl = MotionController(settings)
+    a = settings.assist
+    hybrid = tuning.hybrid_axes(settings)
+    belief = belief or (a.hybrid_gain_x, a.hybrid_gain_y)
     dz = {"right": settings.right.deadzone, "left": settings.left.deadzone,
           "up": settings.up.deadzone, "down": settings.down.deadzone}
     head = [0.0, 0.0]
@@ -28,6 +36,7 @@ def simulate_round(settings, targets, reaction=0.15, lag=0.12, gain=0.5, anticip
         camera = [0.0, 0.0]
         speed = (0.0, 0.0)
         history = []
+        nudge = [None, None]                               # hybrid: head aim while nudging
         while not trial.done:
             err = (target[0] - camera[0], target[1] - camera[1])
             history.append((err, speed))
@@ -35,6 +44,14 @@ def simulate_round(settings, targets, reaction=0.15, lag=0.12, gain=0.5, anticip
             seen = [e - anticipate * v for e, v in zip(seen_err, seen_speed)]
             want = []
             for axis, e in enumerate(seen):
+                name = (("right", "left"), ("up", "down"))[axis][0 if seen_err[axis] > 0 else 1]
+                if axis in hybrid and abs(seen_err[axis]) <= belief[axis] * dz[name] * 0.9:
+                    if nudge[axis] is None:
+                        nudge[axis] = 0.0                  # back to the middle, then nudge
+                    nudge[axis] += seen_err[axis] * rate * DT / belief[axis]
+                    want.append(nudge[axis])
+                    continue
+                nudge[axis] = None
                 if abs(e) <= tuning.RADIUS * 0.6:
                     want.append(0.0)
                     continue
@@ -52,15 +69,15 @@ def simulate_round(settings, targets, reaction=0.15, lag=0.12, gain=0.5, anticip
     return trials
 
 
-def tune(settings, rounds=3):
+def tune(settings, rounds=3, **player):
     """Practice + adjust a few times, keeping a change only if it scored better (like the window)."""
-    targets = tuning.make_targets(seed=1)
+    targets = tuning.make_targets(seed=1, hybrid=settings.assist.hybrid)
     best = settings
-    best_score = tuning.score(simulate_round(best, targets), best)
+    best_score = tuning.score(simulate_round(best, targets, **player), best)
     start = best_score
     for _ in range(rounds):
-        proposal, _ = tuning.propose(best, simulate_round(best, targets))
-        s = tuning.score(simulate_round(proposal, targets), proposal)
+        proposal, _ = tuning.propose(best, simulate_round(best, targets, **player))
+        s = tuning.score(simulate_round(proposal, targets, **player), proposal)
         if tuning.worth_keeping(best_score, s):
             best, best_score = proposal, s
     return start, best_score, best
@@ -137,6 +154,52 @@ class ImprovementTests(unittest.TestCase):
 
     def test_good_settings_are_not_made_worse(self):
         start, end, best = tune(config.Settings())
+        self.assertLessEqual(end, start)
+        config.validate(best)
+
+
+class HybridTuningTests(unittest.TestCase):
+    """Mouse-like aiming: small targets tune its strength, the dead zone (its area) is left alone."""
+
+    def hybrid(self, **assist):
+        return dataclasses.replace(config.Settings(), assist=dataclasses.replace(
+            config.Settings().assist, hybrid=True, **assist))
+
+    def test_small_targets_with_hybrid(self):
+        targets = tuning.make_targets(seed=2, hybrid=True)
+        s = self.hybrid()
+        small = [t for t in targets if tuning.trial_metrics(tuning.Trial(t), s)["small"]]
+        self.assertEqual(sorted(tuning.direction_of(t)[0] for t in small), ["down", "left", "right", "up"])
+
+    def test_jumpy_gets_gentler(self):
+        s = self.hybrid(hybrid_gain_x=6.0, hybrid_gain_y=6.0)
+        trials = simulate_round(s, tuning.make_targets(seed=1, hybrid=True), belief=(1.5, 1.5))
+        new, notes = tuning.propose(s, trials)
+        self.assertIn("aiming", notes)
+        self.assertLess(new.assist.hybrid_gain_x, 6.0, notes)
+        self.assertEqual((new.right.deadzone, new.up.deadzone), (s.right.deadzone, s.up.deadzone))
+        config.validate(new)
+
+    def test_too_weak_gets_stronger(self):
+        s = self.hybrid(hybrid_gain_x=1.5, hybrid_gain_y=1.0)
+        trials = simulate_round(s, tuning.make_targets(seed=1, hybrid=True))
+        new, notes = tuning.propose(s, trials)
+        self.assertGreater(new.assist.hybrid_gain_x, 1.5, notes)
+        config.validate(new)
+
+    def test_off_leaves_aiming_alone(self):
+        s = all_dirs(config.Settings(), min_speed=30.0, curve=1.0)
+        new, notes = tuning.propose(s, simulate_round(s, tuning.make_targets(seed=1)))
+        self.assertNotIn("aiming", notes)
+        self.assertEqual(new.assist, s.assist)
+
+    def test_jumpy_improves(self):
+        start, end, best = tune(self.hybrid(hybrid_gain_x=6.0, hybrid_gain_y=6.0), belief=(1.5, 1.5))
+        self.assertLess(end, start * 0.95, (start, end))
+        self.assertLess(best.assist.hybrid_gain_x, 6.0)
+
+    def test_good_hybrid_settings_are_not_made_worse(self):
+        start, end, best = tune(self.hybrid())
         self.assertLessEqual(end, start)
         config.validate(best)
 

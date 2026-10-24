@@ -158,6 +158,10 @@ class AssistSettings:
     auto_center_limit: float = 6.0    # never shift the center more than this (degrees)
     vertical_follow: bool = False     # up/down follows the head like a mouse
     vertical_follow_gain: float = 4.0
+    hybrid: bool = False              # mouse-like inside the dead zone, joystick beyond it
+    hybrid_gain_x: float = 3.0        # camera degrees per head degree, left/right
+    hybrid_gain_y: float = 3.0        # camera degrees per head degree, up/down
+    hybrid_blend: float = 2.0         # degrees past the dead zone over which mouse fades into joystick
 
 
 @dataclass
@@ -316,6 +320,9 @@ def validate(s):
     _check(2 <= a.auto_center_seconds <= 60, "[assist] auto_center_seconds must be 2-60")
     _check(0 <= a.auto_center_limit <= 20, "[assist] auto_center_limit must be 0-20 degrees")
     _check(0.5 <= a.vertical_follow_gain <= 20, "[assist] vertical_follow_gain must be 0.5-20")
+    _check(0.5 <= a.hybrid_gain_x <= 20 and 0.5 <= a.hybrid_gain_y <= 20,
+           "[assist] hybrid_gain_x and hybrid_gain_y must be 0.5-20")
+    _check(0 <= a.hybrid_blend <= 10, "[assist] hybrid_blend must be 0-10 degrees")
 
 
 def load(path):

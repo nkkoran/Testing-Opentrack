@@ -107,7 +107,7 @@ class HeadMouse:
             self._events.append(Event("warning", "Cannot re-center: no head tracking right now"))
             return
         self.offset = self.raw_angles
-        self.controller.drift = [0.0, 0.0]
+        self.controller.recentered()  # the head didn't move, so the camera mustn't either
         self._events.append(Event("recentered", f"Re-centered (yaw {self.offset[0]:+.1f}, "
                                                 f"pitch {self.offset[1]:+.1f})", self.offset))
 
@@ -374,7 +374,7 @@ class Engine:
         """Set the neutral head position directly (used by the setup wizard)."""
         def do():
             self.app.offset = tuple(offset)
-            self.app.controller.drift = [0.0, 0.0]
+            self.app.controller.recentered()
         self.call(do)
 
     def set_hold(self, reason, on):

@@ -10,6 +10,13 @@ at how they reached the targets:
 * can't stop     - reached the target but drifted off again     -> bigger dead zone
 * dead-zone push - head held just at the dead-zone edge        -> smaller dead zone
 
+With mouse-like aiming (hybrid) on, small targets (within mouse-like reach) tune
+its strength instead, and the dead zone - now the mouse-like area - is left alone:
+
+* jumpy          - overshot or wobbled off small targets        -> gentler (lower strength)
+* too weak       - had to turn past the area for small targets  -> stronger
+* rough hand-over - overshot big turns                          -> wider blend
+
 Changes are small and bounded; the player sees them and decides whether to keep them.
 """
 
@@ -23,15 +30,18 @@ RADIUS = 2.5      # degrees: the crosshair counts as on the target within this
 DWELL = 0.35      # seconds the crosshair must stay on the target
 TIMEOUT = 8.0     # seconds before a target counts as missed
 DIRECTIONS = ("right", "left", "up", "down")
+SMALL_MOVE = (10.0, 6.0)  # degrees (left/right, up/down): with mouse-like aiming, targets this close are small moves
 
 
-def make_targets(seed=None):
-    """12 targets (relative to where the camera points when each appears): 3 per direction."""
+def make_targets(seed=None, hybrid=False):
+    """12 targets (relative to where the camera points when each appears): 3 per direction.
+    With mouse-like aiming, one per direction is a small move (within SMALL_MOVE)."""
     rng = random.Random(seed)
+    yaws, pitches = ((8, 25, 55), (5, 10, 16)) if hybrid else ((15, 35, 60), (6, 12, 18))
     targets = []
     for side in (1, -1):
-        targets += [(side * d, rng.uniform(-3, 3)) for d in (15, 35, 60)]
-        targets += [(rng.uniform(-5, 5), side * d) for d in (6, 12, 18)]
+        targets += [(side * d, rng.uniform(-3, 3)) for d in yaws]
+        targets += [(rng.uniform(-5, 5), side * d) for d in pitches]
     rng.shuffle(targets)
     return targets
 
@@ -88,6 +98,14 @@ class Trial:
         return self.done
 
 
+def hybrid_axes(settings):
+    """Axes (0 = left/right, 1 = up/down) that use mouse-like aiming."""
+    a = settings.assist
+    if not a.hybrid:
+        return ()
+    return (0,) if a.vertical_follow else (0, 1)
+
+
 def trial_metrics(trial, settings):
     name, axis, sign = direction_of(trial.target)
     d = getattr(settings, name)
@@ -102,9 +120,11 @@ def trial_metrics(trial, settings):
     stall = sum(1 for s, h in zip(samples, toward)
                 if abs(s.err[axis]) > 2 * RADIUS and s.speed[axis] == 0
                 and d.deadzone - 0.7 <= h <= d.deadzone + 0.2) / n
+    joystick = dt * sum(1 for h in toward if h > d.deadzone)   # seconds past the mouse-like area
+    small = axis in hybrid_axes(settings) and abs(trial.target[axis]) <= SMALL_MOVE[axis]
     return {"direction": name, "time": trial.time if trial.acquired else TIMEOUT + 2.0,
             "acquired": trial.acquired, "overshoot": overshoot, "full": full, "approach": approach,
-            "exits": max(0, trial.entries - 1), "stall": stall}
+            "exits": max(0, trial.entries - 1), "stall": stall, "joystick": joystick, "small": small}
 
 
 def worth_keeping(old_score, new_score):
@@ -119,12 +139,46 @@ def score(trials, settings):
     return statistics.fmean(trial_metrics(t, settings)["time"] for t in trials)
 
 
+def _propose_hybrid(settings, small, big_overshoot):
+    """Mouse-like aiming strength (per axis) and blend. Returns (assist settings, reasons)."""
+    a = settings.assist
+    changes, why = {}, []
+    for axis in hybrid_axes(settings):
+        field, label = (("hybrid_gain_x", "left/right"), ("hybrid_gain_y", "up/down"))[axis]
+        ms = small[axis]
+        gain = getattr(a, field)
+        if len(ms) < 2:
+            continue
+        mean = lambda key: statistics.fmean(m[key] for m in ms)
+        if mean("overshoot") >= 2.0 or mean("exits") >= 0.8:
+            gain = max(0.5, gain * 0.8)
+            why.append(f"small {label} moves were jumpy - gentler mouse-like aiming")
+        elif mean("joystick") >= 0.3:
+            gain = min(12.0, gain * 1.3)
+            why.append(f"small {label} moves needed a turn - stronger mouse-like aiming")
+        elif mean("approach") >= 1.2 or mean("time") >= 2.5:
+            gain = min(12.0, gain * 1.15)
+            why.append(f"slow on small {label} moves - a bit stronger mouse-like aiming")
+        if round(gain, 1) != getattr(a, field):
+            changes[field] = round(gain, 1)
+    if big_overshoot and a.hybrid_blend < 4.0:
+        changes["hybrid_blend"] = a.hybrid_blend + 1.0
+        why.append("overshot bigger turns - smoother hand-over from mouse-like to turning")
+    return dataclasses.replace(a, **changes), why
+
+
 def propose(settings, trials):
-    """New settings from one round of practice. Returns (new_settings, notes {direction: [reasons]})."""
+    """New settings from one round of practice. Returns (new_settings, notes {direction or "aiming": [reasons]})."""
     by_dir = {name: [] for name in DIRECTIONS}
+    small = ([], [])          # hybrid: small-move trials per axis
     for t in trials:
         m = trial_metrics(t, settings)
-        by_dir[m["direction"]].append(m)
+        if m["small"]:
+            small[direction_of(t.target)[1]].append(m)
+        else:
+            by_dir[m["direction"]].append(m)
+    hybrid = hybrid_axes(settings)
+    big_overshoot_any = False
     g = settings.general
     groups = ([("right", "left")] if g.link_left_right else [("right",), ("left",)]) + \
              ([("up", "down")] if g.link_up_down else [("up",), ("down",)])
@@ -150,6 +204,8 @@ def propose(settings, trials):
         why = []
         overshoot = mean("overshoot")
         big_overshoot = overshoot >= 6.0 or over_rate >= 0.5
+        mouse_area = DIRECTIONS.index(name) // 2 in hybrid   # the dead zone is the mouse-like area: leave it
+        big_overshoot_any |= big_overshoot and mouse_area
         if big_overshoot:
             # The worse the overshoot, the bigger the correction.
             if overshoot >= 20.0:
@@ -172,7 +228,9 @@ def propose(settings, trials):
             lo = min(30.0, max(1.0, lo * 1.35))
             curve = max(1.0, curve - 0.2)
             why.append("slow final approach - a little quicker near the middle")
-        if not big_overshoot and mean("exits") >= 0.8:
+        if mouse_area:
+            pass
+        elif not big_overshoot and mean("exits") >= 0.8:
             dz = min(6.0, dz + 0.5)
             lo *= 0.85
             why.append("hard to stop on the target - bigger dead zone")
@@ -188,4 +246,9 @@ def propose(settings, trials):
                 d, deadzone=round(dz, 1), full_speed_angle=round(full, 1), min_speed=round(lo, 1),
                 max_speed=round(hi / 5) * 5, curve=round(curve, 2))})
             notes[n] = why
+    if hybrid:
+        assist, why = _propose_hybrid(settings, small, big_overshoot_any)
+        if why:
+            new = dataclasses.replace(new, assist=assist)
+            notes["aiming"] = why
     return new, notes
