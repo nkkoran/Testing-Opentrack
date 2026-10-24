@@ -75,6 +75,7 @@ class GeneralSettings:
     link_left_right: bool = False   # Settings > Feel: changing one side changes the other too
     link_up_down: bool = False
     precision_toggle: bool = False  # True: tap the precision key to switch precision aim on/off
+    checkup_done: bool = False      # the practice check-up has been played (Getting started)
 
 
 @dataclass

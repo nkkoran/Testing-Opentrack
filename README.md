@@ -99,6 +99,7 @@ stopped), short high tone = tracking back.
 | Head control switch | Same as F10 |
 | Head view | The dot is your head. Green box = dead zone, dashed box = full speed; the arrows light up in the direction the camera is turning |
 | Re-center | Look straight at the screen and press it (or F8) |
+| Getting started | A checklist of the steps that make HeadMouse fit you, ticked off as they're done, each with a button that goes there |
 | Quick fixes | Say what feels wrong ("small aiming is jumpy", "keeps moving after I stop"...) and HeadMouse adjusts it (below) |
 | Settings | Everything else (below) |
 | Camera / Stay on top | Small switches at the bottom: a floating camera preview, and keeping HeadMouse above the game |
@@ -416,6 +417,7 @@ headmouse/quickfix.py         Quick fixes: plain-language problems -> small, bou
 headmouse/situations.py       Situations: descriptions and suggested feels (aiming, building, menus)
 headmouse/practice.py         practice check-up: blocks, throughput scoring, trying and confirming variations
 headmouse/actions.py          click actions: gestures (smoothing, threshold, hold) and key/gesture -> buttons
+headmouse/guide.py            Getting started steps and which are done
 headmouse/gui.py              the window (CustomTkinter): main screen, Settings, setup wizard
 headmouse/opentrack_setup.py  OpenTrack profile copy/patch and launching
 headmouse/winput.py           Windows SendInput / GetAsyncKeyState

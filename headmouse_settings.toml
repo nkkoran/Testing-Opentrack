@@ -335,6 +335,8 @@ link_up_down = false
 # Precision key: false = hold it for precision aim; true = tap it to switch
 # precision aim on, tap again to switch it off (a beep tells you which).
 precision_toggle = false
+# Set when the practice check-up has been played (for the Getting started list).
+checkup_done = false
 
 
 # -----------------------------------------------------------------------------

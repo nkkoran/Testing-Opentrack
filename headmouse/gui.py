@@ -16,7 +16,7 @@ from tkinter import messagebox
 
 import customtkinter as ctk
 
-from . import actions, calibration, config, opentrack_setup, practice, quickfix, situations, updates
+from . import actions, calibration, config, guide, opentrack_setup, practice, quickfix, situations, updates
 from .curves import DirectionCurve
 from .engine import Engine, uses_eyes
 from .keys import name_from_tk_keysym
@@ -336,6 +336,12 @@ class MainWindow:
         self._preset_values = None
         self._preset_next_check = 0.0
 
+        self.guide_button = ctk.CTkButton(outer, text="", command=self.open_guide, height=30, corner_radius=10,
+                                          font=font(12, "bold"), fg_color=SUBTLE, hover_color=SUBTLE_HOVER,
+                                          text_color=TEXT, anchor="w")
+        self.guide_button.pack(fill="x", pady=(10, 0))
+        self._guide_shown = None
+
         self.keys = ctk.CTkFrame(outer, fg_color="transparent")
         self.keys.pack(fill="x", pady=(14, 4))
         self._keys_shown = None
@@ -502,6 +508,16 @@ class MainWindow:
             return None
         return self._open("practice", lambda: PracticeWindow(self))
 
+    def open_guide(self):
+        return self._open("guide", lambda: GuideWindow(self))
+
+    def _show_guide(self, settings):
+        done, total = guide.progress(settings)
+        text = f"Getting started  ·  {done} of {total} done  ›" if done < total else "Getting started  ·  all set ✓"
+        if text != self._guide_shown:
+            self._guide_shown = text
+            self.guide_button.configure(text=text)
+
     def open_quickfix(self, axis="x"):
         if not self._close_settings():
             return None
@@ -556,6 +572,7 @@ class MainWindow:
         self.camera_switch.configure(state="normal" if snap.source_kind == "webcam" else "disabled")
         self._show_keys(snap.settings.keys)
         self._show_presets(snap.settings)
+        self._show_guide(snap.settings)
         if self.update_info and not self.update_button.winfo_ismapped():
             self.update_button.configure(text=f"Update to {self.update_info[0]}")
             self.update_button.pack(side="right", padx=(0, 8))
@@ -2188,6 +2205,65 @@ def run_gui(settings_path, base_dir, dry_run=False, engine=None):
     return 0
 
 
+class GuideWindow(Child):
+    """Getting started: the steps that make HeadMouse work well, ticked off as they are done."""
+
+    def __init__(self, main):
+        super().__init__(main, "HeadMouse - getting started", "560x760")
+        bar = ctk.CTkFrame(self.top, fg_color="transparent")
+        bar.pack(side="bottom", fill="x", padx=24, pady=(6, 18))
+        primary_button(bar, "Done", self.close, width=150).pack(side="right")
+        outer = card(self.top)
+        outer.pack(fill="both", expand=True, padx=24, pady=(18, 6))
+        self.body = scroll_frame(outer)
+        self.body.pack(fill="both", expand=True, padx=4, pady=4)
+        self._shown = None
+        self.refresh()
+
+    def refresh(self):
+        if not self.alive():
+            return
+        settings = self.engine.settings
+        steps = guide.steps(settings)
+        state = [(st.key, st.done) for st in steps]
+        if state != self._shown:
+            self._shown = state
+            for w in self.body.winfo_children():
+                w.destroy()
+            ctk.CTkLabel(self.body, text="Getting started", font=font(22, "bold"), text_color=TEXT,
+                         anchor="w").pack(fill="x", padx=14, pady=(14, 2))
+            ctk.CTkLabel(self.body, text="These steps make HeadMouse fit you. Do them in order; the optional ones "
+                                         "help with particular things.", font=font(13), text_color=MUTED,
+                         wraplength=440, justify="left", anchor="w").pack(fill="x", padx=14)
+            for st in steps:
+                self._step(st)
+        self.top.after(1000, self.refresh)
+
+    def _step(self, st):
+        box = ctk.CTkFrame(self.body, fg_color=SUBTLE, corner_radius=14)
+        box.pack(fill="x", padx=14, pady=(10, 0))
+        top = ctk.CTkFrame(box, fg_color="transparent")
+        top.pack(fill="x", padx=12, pady=(10, 0))
+        mark = "✓" if st.done else "○"
+        ctk.CTkLabel(top, text=mark, font=font(18, "bold"), width=28,
+                     text_color=STATE_COLORS["ACTIVE"] if st.done else MUTED).pack(side="left")
+        ctk.CTkLabel(top, text=st.title, font=font(14, "bold"), text_color=TEXT, anchor="w", wraplength=300,
+                     justify="left").pack(side="left", fill="x", expand=True)
+        small_button(top, "Open" if st.done else "Start", lambda k=st.key: self.open(k), width=80,
+                     **({} if not st.done else dict(fg_color=PILL, hover_color=SUBTLE_HOVER,
+                                                     text_color=TEXT))).pack(side="right")
+        ctk.CTkLabel(box, text=st.why, font=font(11), text_color=MUTED, wraplength=360, justify="left",
+                     anchor="w").pack(fill="x", padx=(52, 12), pady=(0, 10))
+
+    def open(self, key):
+        m = self.main
+        target = {"wizard": m.open_wizard, "game": lambda: m.open_settings("Game"),
+                  "feel": lambda: m.open_settings("Feel"), "practice": m.open_practice,
+                  "situations": lambda: m.open_settings("Situations"), "clicks": lambda: m.open_settings("Clicks"),
+                  "glance": lambda: m.open_settings("Feel")}[key]
+        target()
+
+
 class QuickFixWindow(Child):
     """Say what feels wrong; each tap makes a small change that is used and saved straight away."""
 
@@ -2414,7 +2490,9 @@ class PracticeWindow(Child):
     def _show_result(self):
         c = self.checkup
         self.playing = False
-        self.engine.apply_settings(self.original, save=False)
+        if not self.original.general.checkup_done:   # for the Getting started list
+            self.original = replace(self.original, "general", checkup_done=True)
+        self.engine.apply_settings(self.original, save=True)
         lines = []
         if "precision" in c.scores:
             before, after = c.scores["precision"]
@@ -2458,7 +2536,8 @@ class PracticeWindow(Child):
     def _use_new(self):
         self.engine.set_practice(False)
         try:
-            new = quickfix.store(self.engine.path, self.original, self.target, self.target_preset, self.checkup.best)
+            best = replace(self.checkup.best, "general", checkup_done=True)
+            new = quickfix.store(self.engine.path, self.original, self.target, self.target_preset, best)
         except config.SettingsError as e:
             messagebox.showerror("HeadMouse", str(e), parent=self.top)
             return
