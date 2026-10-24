@@ -32,5 +32,27 @@ class OldFileTests(unittest.TestCase):
         self.assertIn("# ", path.read_text(encoding="utf-8"))           # comments kept
 
 
+class SaveRobustnessTests(unittest.TestCase):
+    def setUp(self):
+        self.path = Path(tempfile.mkdtemp()) / "headmouse_settings.toml"
+
+    def test_a_multi_line_array_is_replaced_whole(self):
+        self.path.write_text("[right]\npoints = [\n  [3, 0],\n  [15, 180],\n]\ndeadzone = 3.0\n", encoding="utf-8")
+        config.save_values(self.path, {"right": {"points": []}})
+        s = config.load(self.path)[0]
+        self.assertEqual((s.right.points, s.right.deadzone), ([], 3.0))
+
+    def test_a_broken_file_gives_a_settings_error(self):
+        self.path.write_text("[right]\ndeadzone = 3.0\nthis is not toml\n", encoding="utf-8")
+        with self.assertRaises(config.SettingsError):
+            config.save_values(self.path, {"right": {"deadzone": 4.0}})
+
+    def test_inherited_key_missing_together_with_its_source(self):
+        self.path.write_text("[assist]\nhybrid = true\n", encoding="utf-8")   # neither blend key
+        config.save_values(self.path, {"assist": {"hybrid_blend": 5.0}})
+        s = config.load(self.path)[0]
+        self.assertEqual((s.assist.hybrid_blend, s.assist.hybrid_blend_y), (5.0, 2.0))
+
+
 if __name__ == "__main__":
     unittest.main()

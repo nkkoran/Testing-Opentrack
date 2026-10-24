@@ -217,7 +217,14 @@ def store(path, base, situation, preset, new_feel):
         return new_feel
     if not preset:
         raise SettingsError(f"the {SITUATION_NAMES[situation]} feel has no preset")
-    name = f"{SITUATION_NAMES[situation]} (adjusted)" if is_builtin_preset(preset) else preset
+    name = preset
+    if is_builtin_preset(preset):   # a copy, never over an earlier adjusted one
+        from .config import list_presets
+        existing, n = set(list_presets(path)), 1
+        name = f"{SITUATION_NAMES[situation]} (adjusted)"
+        while name in existing:
+            n += 1
+            name = f"{SITUATION_NAMES[situation]} (adjusted {n})"
     save_preset(path, name, new_feel)
     out = base
     for f in dataclasses.fields(base):

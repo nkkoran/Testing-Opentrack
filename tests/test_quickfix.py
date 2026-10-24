@@ -97,6 +97,15 @@ class SituationFeelTests(unittest.TestCase):
         self.assertLess(config.load_preset(self.path, "Aiming (adjusted)", new_base).right.max_speed,
                         base.right.max_speed)
 
+    def test_an_earlier_adjusted_copy_is_kept(self):
+        base = settings(situations={"aim_preset": config.DEFAULT_PRESET})
+        config.save_preset(self.path, "Aiming (adjusted)", settings())
+        feel, preset = quickfix.target_feel(self.path, base, "aim")
+        fixed, _ = quickfix.apply(feel, "x", "too_fast")
+        new_base = quickfix.store(self.path, base, "aim", preset, fixed)
+        self.assertEqual(new_base.situations.aim_preset, "Aiming (adjusted 2)")
+        self.assertIn("Aiming (adjusted)", config.list_presets(self.path))
+
     def test_normal_feel_is_unchanged_behaviour(self):
         base = settings()
         feel, preset = quickfix.target_feel(self.path, base, None)

@@ -543,14 +543,19 @@ class Engine:
         window holding an older copy can't undo other changes (like a re-center) made meanwhile.
         With save=True exactly these values are written - never a feel being tried out."""
         def do():
-            self._apply(config.overlay(self.settings, changes), save=False)
             if save and changes:
                 try:
+                    self._reload_if_changed()   # someone edited the file just now: keep their edit
                     config.save_values(self.path, changes)
                     self._mtime = self._read_mtime()
                 except (OSError, config.SettingsError) as e:
                     self._message("warning", f"Could not save settings: {e}")
+            self._apply(config.overlay(self.settings, changes), save=False)
         self.call(do)
+
+    def _reload_if_changed(self):
+        if self._read_mtime() != self._mtime:
+            self._check_file()
 
     def play_sound(self, name):
         self.call(lambda: self._sounds.play(name, force=True))
@@ -718,13 +723,14 @@ class Engine:
             # Save only the new middle: the running settings may be a feel being tried out
             # (practice game, settings window) that must not end up in the file.
             neutral = {"neutral_yaw": round(event.data[0], 2), "neutral_pitch": round(event.data[1], 2)}
+            self.settings = config.overlay(self.settings, {"webcam": neutral})   # used now, saved or not
+            self.app.settings = config.overlay(self.app.settings, {"webcam": neutral})
             try:
+                self._reload_if_changed()
                 config.save_values(self.path, {"webcam": neutral}, backup=False)
                 self._mtime = self._read_mtime()
             except (OSError, config.SettingsError) as e:
                 self._message("warning", f"Could not save the new middle: {e}")
-            self.settings = config.overlay(self.settings, {"webcam": neutral})
-            self.app.settings = config.overlay(self.app.settings, {"webcam": neutral})
 
     def _update_snapshot(self):
         app, src = self.app, self.source

@@ -441,12 +441,11 @@ class MainWindow:
                 return
             if name == CUSTOM_PRESET or name == config.matching_preset(self.engine.path, settings):
                 return
-            practice = self.children.get("practice")
-            if practice is not None and practice.alive():
-                messagebox.showinfo("HeadMouse", "Finish the practice game first.", parent=self.root)
+            if self._practising():
                 return
             if not self._close_settings():
                 return
+            self._close_quickfix()
             settings = self.engine.settings
             if config.matching_preset(self.engine.path, settings) is None:
                 answer = messagebox.askyesnocancel(
@@ -454,12 +453,12 @@ class MainWindow:
                                  "Save it first so you can come back to it?", parent=self.root)
                 if answer is None or (answer and not save_preset_as(self.engine, settings, self.root)):
                     return
-            try:
-                new = config.load_preset(self.engine.path, name, self.engine.settings)
+            try:   # from the saved settings, not the running ones (they may still hold tried-out values)
+                new = config.load_preset(self.engine.path, name, config.load(self.engine.path)[0])
             except config.SettingsError as e:
                 messagebox.showerror("HeadMouse", str(e), parent=self.root)
                 return
-            self.engine.apply_settings(new, save=True)
+            self.engine.apply_changes(config.preset_values(new), save=True)
             self.message.configure(text=f'Feel: "{name}"')
             self._notice_until = time.monotonic() + 5
         finally:
@@ -493,6 +492,7 @@ class MainWindow:
     def open_settings(self, tab="Feel"):
         if self._practising():   # the practice game is trying settings out: don't mix them up
             return None
+        self._close_quickfix()
         win = self._open("settings", lambda: SettingsWindow(self, tab))
         win.tabs.set(tab)
         win.tab_changed()
@@ -507,11 +507,17 @@ class MainWindow:
     def open_wizard(self):
         if self._practising() or not self._close_settings():
             return None
+        self._close_quickfix()
         return self._open("wizard", lambda: WizardWindow(self))
 
     def open_practice(self):
+        wizard = self.children.get("wizard")
+        if wizard is not None and wizard.alive():
+            messagebox.showinfo("HeadMouse", "Finish the setup wizard first.", parent=self.root)
+            return None
         if not self._close_settings():
             return None
+        self._close_quickfix()
         return self._open("practice", lambda: PracticeWindow(self))
 
     def open_guide(self):
@@ -525,12 +531,20 @@ class MainWindow:
             self.guide_button.configure(text=text)
 
     def _practising(self):
-        practice = self.children.get("practice")
-        if practice is not None and practice.alive():
-            messagebox.showinfo("HeadMouse", "Finish the practice game first.", parent=self.root)
-            practice.top.lift()
-            return True
+        for name, what in (("practice", "the practice game"), ("wizard", "the setup wizard")):
+            win = self.children.get(name)
+            if win is not None and win.alive():
+                messagebox.showinfo("HeadMouse", f"Finish {what} first.", parent=self.root)
+                win.top.lift()
+                return True
         return False
+
+    def _close_quickfix(self):
+        """Quick fixes keeps its own copy of the settings (for Undo): close it before anything else
+        changes them. Its changes are already saved."""
+        win = self.children.get("quickfix")
+        if win is not None and win.alive():
+            win.close()
 
     def open_quickfix(self, axis="x"):
         if self._practising() or not self._close_settings():
@@ -1990,7 +2004,7 @@ class WizardWindow(Child):
     def _source_changed(self):
         value = self.source.get()
         if value != self.engine.settings.tracking.source:
-            self.engine.apply_settings(replace(self.engine.settings, "tracking", source=value))
+            self.engine.apply_changes({"tracking": {"source": value}})
             self.top.after(600, lambda: self.engine.set_preview(True))
 
     def _figure(self, direction):
@@ -2145,7 +2159,8 @@ class WizardWindow(Child):
                 # Keep the player's own sensitivity; only the tracking calibration is updated.
                 old = self.old_settings
                 new = dataclasses.replace(new, right=old.right, left=old.left, up=old.up, down=old.down)
-            self.engine.apply_settings(replace(new, "general", setup_done=True))
+            final = replace(new, "general", setup_done=True)
+            self.engine.apply_changes(config.diff(self.old_settings, final))   # only what the wizard measured
             if new.tracking.source == "opentrack":
                 self.engine.set_offset(offset)
             self.engine.play_sound("done")

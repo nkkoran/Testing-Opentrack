@@ -503,6 +503,16 @@ def update_text(text, updates):
         if not todo:
             continue
         for key in list(todo):
+            start = re.match(rf"^(\s*{re.escape(key)}\s*=\s*)\[", line)
+            if start and line.split("#")[0].count("[") > line.split("#")[0].count("]"):   # array over several lines
+                end, depth = i, line.split("#")[0].count("[") - line.split("#")[0].count("]")
+                while depth > 0 and end + 1 < len(lines):
+                    end += 1
+                    code = lines[end].split("#")[0]
+                    depth += code.count("[") - code.count("]")
+                lines[i] = start.group(1) + format_value(todo.pop(key))
+                del lines[i + 1:end + 1]
+                break
             km = re.match(rf"^(\s*{re.escape(key)}\s*=\s*)({_VALUE_RE})(\s*(#.*)?)$", line)
             if km:
                 lines[i] = km.group(1) + format_value(todo.pop(key)) + km.group(3)
@@ -721,12 +731,18 @@ def save_values(path, updates, backup=True):
     updates = {sec: dict(vals) for sec, vals in updates.items()}
     for section, new, old in INHERITED:
         # The file relies on the old key for the new one: write it down before the old key changes.
-        values = before.get(section)
-        if isinstance(values, dict) and old in values and new not in values \
-                and old in updates.get(section, {}) and new not in updates[section]:
-            updates[section][new] = values[old]
+        values = before.get(section) if isinstance(before.get(section), dict) else {}
+        if new not in values and old in updates.get(section, {}) and new not in updates[section]:
+            if old in values:
+                updates[section][new] = values[old]
+            else:   # neither is in the file: both are the default
+                defaults = {f.name: f.default for f in dataclasses.fields(type(getattr(Settings(), section)))}
+                updates[section][new] = defaults[new]
     new_text = update_text(text, updates)
-    from_dict(tomllib.loads(new_text))  # never write a file that would not load
+    try:
+        from_dict(tomllib.loads(new_text))  # never write a file that would not load
+    except tomllib.TOMLDecodeError as e:
+        raise SettingsError(f"the settings file could not be updated ({e}) - check it in Notepad") from None
     if new_text != text and backup:
         make_backup(path)
     tmp = path.with_suffix(".tmp")
