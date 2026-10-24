@@ -513,7 +513,13 @@ def earlier_install_settings():
 # A preset is a named "feel": the four direction curves and the motion settings.
 # Keys, camera, game and glance settings are never touched by a preset.
 
-PRESET_SECTIONS = ("right", "left", "up", "down", "motion")
+PRESET_SECTIONS = ("right", "left", "up", "down", "motion", "assist")
+# From [assist], a preset keeps only how the head moves the camera (modes and the
+# mouse-like settings) - not the helpers like "stop in the middle".
+PRESET_ASSIST = ("hybrid", "hybrid_horizontal", "hybrid_vertical", "vertical_follow", "vertical_follow_gain",
+                 "hybrid_gain_x", "hybrid_gain_y", "hybrid_blend", "hybrid_blend_y", "mouse_delay_x",
+                 "mouse_delay_y", "slow_precision_x", "slow_precision_y", "fast_speed_x", "fast_speed_y",
+                 "wobble_x", "wobble_y")
 DEFAULT_PRESET = "Normal (default)"
 
 
@@ -560,7 +566,9 @@ def is_builtin_preset(name):
 
 def preset_values(settings):
     """{section: {key: value}} for the parts of `settings` a preset stores."""
-    return {name: dataclasses.asdict(getattr(settings, name)) for name in PRESET_SECTIONS}
+    values = {name: dataclasses.asdict(getattr(settings, name)) for name in PRESET_SECTIONS}
+    values["assist"] = {key: values["assist"][key] for key in PRESET_ASSIST}
+    return values
 
 
 def save_preset(path, name, settings):
@@ -586,10 +594,12 @@ def save_preset(path, name, settings):
 
 
 def load_preset(path, name, base):
-    """`base` with the preset's direction curves and motion settings in place."""
+    """`base` with the preset's feel (direction curves, motion and mouse-like settings) in place.
+    Built-in presets and presets saved before mouse-like settings existed keep base's."""
     builtins = builtin_presets()
     if name in builtins:
         values = preset_values(builtins[name])
+        values["assist"] = preset_values(base)["assist"]
     else:
         filename = preset_filename(name)
         file = preset_folder(path) / filename if filename else None
@@ -602,9 +612,11 @@ def load_preset(path, name, base):
         values = preset_values(base)
         for section in PRESET_SECTIONS:
             if isinstance(data.get(section), dict):
-                values[section].update(data[section])
+                values[section].update({k: v for k, v in data[section].items()
+                                        if section != "assist" or k in PRESET_ASSIST})
     merged = {f.name: dataclasses.asdict(getattr(base, f.name)) for f in dataclasses.fields(Settings)}
-    merged.update(values)
+    for section, section_values in values.items():
+        merged[section].update(section_values)
     return from_dict(merged)[0]
 
 

@@ -16,7 +16,7 @@ from tkinter import messagebox
 
 import customtkinter as ctk
 
-from . import calibration, config, opentrack_setup, tuning, updates
+from . import calibration, config, opentrack_setup, quickfix, tuning, updates
 from .curves import DirectionCurve
 from .engine import Engine, uses_eyes
 from .keys import name_from_tk_keysym
@@ -320,9 +320,10 @@ class MainWindow:
 
         buttons = ctk.CTkFrame(outer, fg_color="transparent")
         buttons.pack(fill="x")
-        buttons.columnconfigure((0, 1), weight=1, uniform="b")
-        secondary_button(buttons, "Re-center", engine.recenter).grid(row=0, column=0, sticky="ew", padx=(0, 6))
-        primary_button(buttons, "Settings", self.open_settings).grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        buttons.columnconfigure((0, 1, 2), weight=1, uniform="b")
+        secondary_button(buttons, "Re-center", engine.recenter).grid(row=0, column=0, sticky="ew", padx=(0, 4))
+        secondary_button(buttons, "Quick fixes", self.open_quickfix).grid(row=0, column=1, sticky="ew", padx=4)
+        primary_button(buttons, "Settings", self.open_settings).grid(row=0, column=2, sticky="ew", padx=(4, 0))
 
         presets = ctk.CTkFrame(outer, fg_color="transparent")
         presets.pack(fill="x", pady=(12, 0))
@@ -497,6 +498,11 @@ class MainWindow:
         if not self._close_settings():
             return None
         return self._open("practice", lambda: PracticeWindow(self))
+
+    def open_quickfix(self, axis="x"):
+        if not self._close_settings():
+            return None
+        return self._open("quickfix", lambda: QuickFixWindow(self, axis))
 
     def close(self):
         self.engine.stop()
@@ -793,8 +799,14 @@ class SettingsWindow(Child):
         self.feel_scroll = scroll
         self.feel_top = ctk.CTkFrame(scroll, fg_color="transparent")
         self.feel_top.pack(fill="x", pady=(0, 12))
-        primary_button(self.feel_top, "Find my best settings (practice game)", self.main.open_practice,
-                       height=42).pack(fill="x")
+        helpers = ctk.CTkFrame(self.feel_top, fg_color="transparent")
+        helpers.pack(fill="x")
+        helpers.columnconfigure(0, weight=3)
+        helpers.columnconfigure(1, weight=2)
+        primary_button(helpers, "Find my best settings (practice game)", self.main.open_practice,
+                       height=42).grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        secondary_button(helpers, "Quick fixes", lambda: self.main.open_quickfix(self.axis),
+                         height=42).grid(row=0, column=1, sticky="ew")
         row = ctk.CTkFrame(self.feel_top, fg_color="transparent")
         row.pack(fill="x", pady=(10, 0))
         ctk.CTkLabel(row, text="Preset", font=font(13, "bold"), text_color=TEXT).pack(side="left")
@@ -981,8 +993,8 @@ class SettingsWindow(Child):
             messagebox.showerror("HeadMouse", str(e), parent=self.top)
             self._show_presets()
             return
-        for section in config.PRESET_SECTIONS:
-            self._set(section, **dataclasses.asdict(getattr(new, section)))
+        for section, values in config.preset_values(new).items():
+            self._set(section, **values)
         self._load_axis()
         self.precision.set(self.work.motion.precision_speed_factor * 100)
         self._show_presets()
@@ -1908,6 +1920,82 @@ def run_gui(settings_path, base_dir, dry_run=False, engine=None):
     MainWindow(root, engine)
     root.mainloop()
     return 0
+
+
+class QuickFixWindow(Child):
+    """Say what feels wrong; each tap makes a small change that is used and saved straight away."""
+
+    def __init__(self, main, axis="x"):
+        super().__init__(main, "HeadMouse quick fixes", "560x760")
+        self.axis = axis
+        self.current = self.engine.settings   # the engine applies changes a moment later
+        self.history = []   # settings before each change, for Undo
+        buttons = ctk.CTkFrame(self.top, fg_color="transparent")
+        buttons.pack(side="bottom", fill="x", padx=24, pady=(6, 18))
+        primary_button(buttons, "Done", self.close, width=150).pack(side="right")
+        self.undo_button = secondary_button(buttons, "Undo last change", self.undo, width=200, state="disabled")
+        self.undo_button.pack(side="left")
+        outer = card(self.top)
+        outer.pack(fill="both", expand=True, padx=24, pady=(18, 6))
+        body = scroll_frame(outer)
+        body.pack(fill="both", expand=True, padx=4, pady=4)
+        ctk.CTkLabel(body, text="What feels wrong?", font=font(22, "bold"), text_color=TEXT,
+                     anchor="w").pack(fill="x", padx=14, pady=(18, 2))
+        ctk.CTkLabel(body, text="Tap the problem. HeadMouse makes a small change and uses it straight away - "
+                                "try it in the game, and tap again if it needs more. Every change is saved "
+                                "and can be undone.", font=font(13), text_color=MUTED, wraplength=440,
+                     justify="left", anchor="w").pack(fill="x", padx=14)
+        self.axis_buttons = segmented(body, ["Left & right", "Up & down"], self._axis_selected, height=40)
+        self.axis_buttons.pack(fill="x", padx=14, pady=(14, 4))
+        self.axis_buttons.set("Left & right" if axis == "x" else "Up & down")
+        self.mode_label = ctk.CTkLabel(body, text="", font=font(12), text_color=MUTED, anchor="w")
+        self.mode_label.pack(fill="x", padx=14)
+        self.fix_frame = ctk.CTkFrame(body, fg_color="transparent")
+        self.fix_frame.pack(fill="x", padx=14, pady=(8, 0))
+        self.result = ctk.CTkLabel(body, text="", font=font(13), text_color=TEXT, wraplength=440, justify="left",
+                                   anchor="w")
+        self.result.pack(fill="x", padx=14, pady=(4, 8), after=self.mode_label)
+        self._show_fixes()
+
+    def _axis_selected(self, label):
+        self.axis = "x" if label == "Left & right" else "y"
+        self._show_fixes()
+
+    def _show_fixes(self):
+        for w in self.fix_frame.winfo_children():
+            w.destroy()
+        s = self.current
+        mode = config.axis_modes(s)[0 if self.axis == "x" else 1]
+        self.mode_label.configure(text=f"Uses {SettingsWindow.MODE_LABELS[mode]} (change it in Settings > Feel)")
+        for fix in quickfix.available(s, self.axis):
+            secondary_button(self.fix_frame, fix.label, lambda k=fix.key: self.apply(k), height=40,
+                             anchor="w").pack(fill="x", pady=3)
+
+    def apply(self, key):
+        old = self.current
+        new, lines = quickfix.apply(old, self.axis, key)
+        if not lines:
+            self.result.configure(text="That's already as far as it goes. Try another fix, or look at "
+                                       "Settings > Feel.", text_color=MUTED)
+            return
+        self.history.append(old)
+        self.current = new
+        self.engine.apply_settings(new, save=True)
+        tip = quickfix.tip(old, self.axis, key)
+        self.result.configure(text="Changed:\n" + "\n".join(f"•  {line}" for line in lines)
+                              + (f"\n\nTip: {tip}" if tip else ""), text_color=TEXT)
+        self.undo_button.configure(state="normal")
+        self._show_fixes()
+
+    def undo(self):
+        if not self.history:
+            return
+        self.current = self.history.pop()
+        self.engine.apply_settings(self.current, save=True)
+        self.result.configure(text="Undone - back to how it was before that change.", text_color=MUTED)
+        if not self.history:
+            self.undo_button.configure(state="disabled")
+        self._show_fixes()
 
 
 class PracticeWindow(Child):

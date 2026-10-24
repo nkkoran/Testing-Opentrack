@@ -59,6 +59,21 @@ class PresetTests(unittest.TestCase):
         self.assertNotIn("Mine", config.list_presets(self.path))
         self.assertIsNone(config.matching_preset(self.path, self.tuned()))
 
+    def test_mouse_like_settings_travel_with_presets(self):
+        aim = dataclasses.replace(config.Settings(), assist=dataclasses.replace(
+            config.Settings().assist, hybrid=True, hybrid_gain_x=0.8, slow_precision_x=0.4, return_stop=True))
+        config.save_preset(self.path, "Aiming", aim)
+        loaded = config.load_preset(self.path, "Aiming", config.Settings())
+        self.assertEqual(config.axis_modes(loaded), ("hybrid", "hybrid"))
+        self.assertEqual((loaded.assist.hybrid_gain_x, loaded.assist.slow_precision_x), (0.8, 0.4))
+        self.assertFalse(loaded.assist.return_stop)                 # helpers are not part of a preset
+        # built-in presets and older preset files keep the current mouse-like settings
+        self.assertEqual(config.axis_modes(config.load_preset(self.path, config.DEFAULT_PRESET, aim)),
+                         ("hybrid", "hybrid"))
+        (config.preset_folder(self.path) / "Old.toml").write_text("[right]\nmax_speed = 200.0\n", encoding="utf-8")
+        old = config.load_preset(self.path, "Old", aim)
+        self.assertEqual((old.right.max_speed, old.assist.hybrid_gain_x), (200.0, 0.8))
+
     def test_bad_names_and_files(self):
         with self.assertRaises(config.SettingsError):
             config.save_preset(self.path, "///", self.tuned())
