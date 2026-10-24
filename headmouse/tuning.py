@@ -73,6 +73,9 @@ class Trial:
     entries: int = 0          # times the crosshair arrived on the target
     acquired: bool = False
     done: bool = False
+    radius: float = RADIUS    # degrees: on the target within this
+    dwell: float = DWELL      # seconds to stay on it
+    timeout: float = TIMEOUT
     _inside: bool = False
     _on_since: float = None
 
@@ -80,23 +83,43 @@ class Trial:
     def time(self):
         return self.samples[-1].t - self.start if self.samples else 0.0
 
+    @property
+    def movement_time(self):
+        """Seconds until the crosshair arrived for good (the dwell itself not counted)."""
+        if self.acquired and self._on_since is not None:
+            return self._on_since - self.start
+        return self.time
+
+    @property
+    def endpoint(self):
+        """Where the crosshair ended, relative to where it started."""
+        last = self.samples[-1].err if self.samples else self.target
+        return (self.target[0] - last[0], self.target[1] - last[1])
+
+    def hold_samples(self):
+        """Samples during the final stay on the target."""
+        if self._on_since is None:
+            return []
+        return [x for x in self.samples if x.t >= self._on_since]
+
     def add(self, t, camera, head, speed):
         """Record one moment. camera: (yaw, pitch) turned since the target appeared. Returns done."""
         if self.start is None:
             self.start = t
         err = (self.target[0] - camera[0], self.target[1] - camera[1])
         self.samples.append(Sample(t, err, tuple(head), tuple(speed)))
-        if math.hypot(*err) <= RADIUS:
+        if math.hypot(*err) <= self.radius:
             if not self._inside:
                 self.entries += 1
                 self._inside = True
                 self._on_since = t
-            if t - self._on_since >= DWELL:
+            if t - self._on_since >= self.dwell:
                 self.acquired = self.done = True
         else:
             self._inside = False
-            self._on_since = None
-        if t - self.start >= TIMEOUT:
+            if not self.acquired:
+                self._on_since = None
+        if t - self.start >= self.timeout:
             self.done = True
         return self.done
 

@@ -16,7 +16,7 @@ from tkinter import messagebox
 
 import customtkinter as ctk
 
-from . import calibration, config, opentrack_setup, quickfix, situations, tuning, updates
+from . import calibration, config, opentrack_setup, practice, quickfix, situations, updates
 from .curves import DirectionCurve
 from .engine import Engine, uses_eyes
 from .keys import name_from_tk_keysym
@@ -2145,45 +2145,49 @@ class QuickFixWindow(Child):
 
 
 class PracticeWindow(Child):
-    """Practice game: steer onto targets, then HeadMouse suggests settings that suit you."""
+    """Practice check-up: short blocks of targets that measure your settings, try a few
+    variations and keep only what clearly works better (see practice.py)."""
 
     SCENE = ("#0f172a", "#0b1120")
     GRID = ("#1e293b", "#172033")
-    PX_PER_DEG = 8.0
+    PX_PER_DEG = {"precision": 16.0, "steady": 16.0, "turns": 8.0}
+    GET_READY = 2.5   # seconds between blocks
 
     def __init__(self, main):
-        super().__init__(main, "HeadMouse practice", "780x700")
+        super().__init__(main, "HeadMouse practice", "780x760")
         self.original = self.engine.settings
-        self.round = 0
-        self.scores = []
-        self.proposal = None
-        self.notes = {}
+        self.checkup = None
+        self.block = None
         self.trial = None
-        self.trials = []
-        self.targets = []
         self.cam_start = (0.0, 0.0)
         self.next_at = None
+        self.block_starts = None
         self.last_t = None
         self.playing = False
+        self.done_blocks = 0
         self.engine.set_practice(True)
 
         buttons = ctk.CTkFrame(self.top, fg_color="transparent")
         buttons.pack(side="bottom", fill="x", padx=24, pady=(6, 18))
-        self.secondary = secondary_button(buttons, "Cancel", self.close, width=180)
+        self.secondary = secondary_button(buttons, "Cancel", self.close, width=200)
         self.secondary.pack(side="left")
-        self.primary = primary_button(buttons, "Start", self.start_round, width=220)
+        self.primary = primary_button(buttons, "Start", self.start, width=240)
         self.primary.pack(side="right")
         body = card(self.top)
         body.pack(fill="both", expand=True, padx=24, pady=(18, 6))
-        self.heading = ctk.CTkLabel(body, text="Find your best settings", font=font(22, "bold"),
+        self.heading = ctk.CTkLabel(body, text="Find my best settings", font=font(22, "bold"),
                                     text_color=TEXT, anchor="w")
         self.heading.pack(fill="x", padx=22, pady=(18, 2))
-        self.text = ctk.CTkLabel(body, font=font(14), text_color=MUTED, wraplength=680, justify="left", anchor="w",
-                                 text="Steer the crosshair onto each blue target with your head, just like in the "
-                                      "game, and hold it there for a moment. Two short rounds of 12 targets (about "
-                                      "a minute each). The first uses your current settings, the second tries "
-                                      "adjusted ones. Nothing changes unless you choose to keep it.")
+        self.text = ctk.CTkLabel(body, font=font(14), text_color=MUTED, wraplength=700, justify="left", anchor="w",
+                                 text="Steer the crosshair onto each target with your head, just like in the game, "
+                                      "and hold it there for a moment - it turns green. HeadMouse measures how well "
+                                      "your settings work, tries a few small variations, and keeps only what "
+                                      "clearly works better. Short breaks between parts come by themselves; "
+                                      "nothing changes unless you choose to keep it at the end.")
         self.text.pack(fill="x", padx=22)
+        self.focus = segmented(body, list(practice.FOCUSES.values()), None, height=40)
+        self.focus.set(practice.FOCUSES["all"])
+        self.focus.pack(fill="x", padx=22, pady=(12, 0))
         self.k = window_scaling(self.top)
         self.canvas = tk.Canvas(body, width=int(700 * self.k), height=int(380 * self.k), highlightthickness=0, bd=0)
         self.canvas.pack(padx=20, pady=12)
@@ -2196,101 +2200,101 @@ class PracticeWindow(Child):
 
     # flow --------------------------------------------------------------------
 
-    def start_round(self):
-        self.round += 1
-        self.targets = tuning.make_targets(hybrid=bool(tuning.hybrid_axes(self.original)))
-        self.trials = []
-        self.trial = None
-        self.next_at = time.monotonic() + 0.8
-        self.playing = True
+    def start(self):
+        focus = next(k for k, v in practice.FOCUSES.items() if v == self.focus.get())
+        self.engine.apply_settings(self.original, save=False)
+        self.checkup = practice.Checkup(self.original, focus=focus)
+        self.done_blocks = 0
+        self.focus.pack_forget()
         self.primary.configure(state="disabled", text="Playing...")
         self.secondary.configure(text="Stop", command=self.close)
-        self.heading.configure(text=f"Round {self.round} of 2" + ("  -  adjusted settings" if self.round == 2 else ""))
-        self.text.configure(text="Steer onto the blue target and hold still until it turns green.")
+        self._begin(self.checkup.next_block())
+
+    def _begin(self, block):
+        """Show the next block after a short get-ready pause."""
+        self.block, self.trial = block, None
+        if block is None:
+            self._show_result()
+            return
+        self.engine.apply_settings(block.settings, save=False)   # this block's settings, tried live
+        self.playing = True
+        self.next_at = time.monotonic() + self.GET_READY
+        self.heading.configure(text=block.title)
+        what = {"precision": "Small targets: steer onto each one and hold still until it turns green.",
+                "turns": "Far targets: turn to each one (follow the arrow) and hold it.",
+                "steady": "Hold the crosshair as still as you can inside the circle."}[block.kind]
+        trying = f"  Trying: {block.trying}." if block.trying and block.trying != "your settings" else ""
+        self.text.configure(text=what + trying)
+        self.status.configure(text="Get ready...")
 
     def _next_target(self, snap):
-        if len(self.trials) == len(self.targets):
-            self._round_done()
+        if len(self.block.trials) == len(self.block.targets):
+            self.playing = False
+            self.done_blocks += 1
+            self._begin(self.checkup.next_block(self.block))
             return
-        target = self.targets[len(self.trials)]
-        self.trial = tuning.Trial(target)
+        self.trial = self.block.new_trial(self.block.targets[len(self.block.trials)])
         self.cam_start = snap.practice_camera
-        self.status.configure(text=f"Target {len(self.trials) + 1} of {len(self.targets)}")
+        n, total = len(self.block.trials) + 1, len(self.block.targets)
+        self.status.configure(text=f"Target {n} of {total}" if self.block.kind != "steady" else
+                              f"Hold steady {n} of {total}")
 
-    def _round_done(self):
-        settings = self.engine.settings
-        score = tuning.score(self.trials, settings)
-        self.scores.append(score)
-        self.trial = None
+    def _show_result(self):
+        c = self.checkup
         self.playing = False
-        if self.round == 1:
-            self.proposal, self.notes = tuning.propose(settings, self.trials)
-            if not self.notes:
-                self._show_result(no_change=True)
-                return
-            self.engine.apply_settings(self.proposal, save=False)   # try them in round 2
-            self.heading.configure(text="Round 1 done")
-            self.text.configure(text=f"Average {score:.1f} s per target. HeadMouse has adjusted your settings - "
-                                     "now try them in round 2.")
-            self.primary.configure(state="normal", text="Start round 2")
-            self.status.configure(text="")
-        else:
-            self._show_result()
-
-    def _show_result(self, no_change=False):
-        self.round = 99
-        self.primary.configure(state="normal")
-        if no_change:
-            self.heading.configure(text="Your settings already suit you")
-            self.text.configure(text=f"Average {self.scores[0]:.1f} s per target, without overshooting or "
-                                     "struggling. No changes needed.")
-            self.primary.configure(text="Done", command=self.close)
-            self.secondary.configure(text="Practice again", command=self._restart)
-            return
-        before, after = self.scores
-        better = tuning.worth_keeping(before, after)
-        lines = [f"Average time per target: {before:.1f} s with your settings, {after:.1f} s with the new ones."]
-        for name in DIRECTIONS:
-            if name not in self.notes:
-                continue
-            o, n = getattr(self.original, name), getattr(self.proposal, name)
-            changes = [f"{label} {getattr(o, f):g} → {getattr(n, f):g}"
-                       for f, label in (("deadzone", "dead zone"), ("full_speed_angle", "full speed at"),
-                                        ("min_speed", "slowest"), ("max_speed", "top speed"), ("curve", "curve"))
-                       if getattr(o, f) != getattr(n, f)]
-            lines.append(f"{name.title()}: {'; '.join(self.notes[name])}" + (f"  ({', '.join(changes)})" if changes else ""))
-        if "aiming" in self.notes:
-            o, n = self.original.assist, self.proposal.assist
-            changes = [f"{label} {getattr(o, f):g} → {getattr(n, f):g}"
-                       for f, label in (("hybrid_gain_x", "left/right sensitivity"),
-                                        ("hybrid_gain_y", "up/down sensitivity"),
-                                        ("hybrid_blend", "left/right blend"), ("hybrid_blend_y", "up/down blend"))
-                       if getattr(o, f) != getattr(n, f)]
-            lines.append(f"Mouse-like aiming: {'; '.join(self.notes['aiming'])}  ({', '.join(changes)})")
-        self.heading.configure(text="The new settings worked better" if better else "Your old settings did better")
-        self.text.configure(text="\n".join(lines))
-        self.status.configure(text="")
-        if better:
-            self.primary.configure(text="Use the new settings", command=self._use_new)
+        self.engine.apply_settings(self.original, save=False)
+        lines = []
+        if "precision" in c.scores:
+            before, after = c.scores["precision"]
+            better = f" ({(after / before - 1) * 100:.0f}% better)" if before > 0 and after > before * 1.01 else ""
+            lines.append(f"Small aiming score: {before:.2f} → {after:.2f}{better}")
+        if "turns" in c.scores:
+            before, after = c.scores["turns"]
+            lines.append(f"Big turns: {before:.1f} s → {after:.1f} s per target")
+        if "steady" in c.scores:
+            lines.append(f"Holding still: wobble {c.scores['steady'][0]:.2f}° "
+                         + ("(steady)" if c.scores["steady"][0] <= practice.WOBBLY else "(a bit shaky)"))
+        changes = practice.changes(c.original, c.best)
+        self.focus.pack_forget()
+        self.canvas.delete("all")
+        if c.changed and changes:
+            self.heading.configure(text="Found settings that work better for you")
+            text = "\n".join(lines) + "\n\nWhat would change:\n" + "\n".join(f"•  {line}" for line in changes)
+            self.primary.configure(state="normal", text="Use the new settings", command=self._use_new)
             self.secondary.configure(text="Keep my old settings", command=self.close)
         else:
-            self.primary.configure(text="Keep my old settings", command=self.close)
-            self.secondary.configure(text="Use the new ones anyway", command=self._use_new)
+            self.heading.configure(text="Your settings already suit you")
+            text = "\n".join(lines) + "\n\nNothing tried clearly worked better, so nothing changes."
+            self.primary.configure(state="normal", text="Done", command=self.close)
+            self.secondary.configure(text="Practice again", command=self._restart)
+        self.text.configure(text=text)
+        self.status.configure(text="")
+        self._draw_notes(c.notes)
+        self.progress.set(1)
+
+    def _draw_notes(self, notes):
+        c, k = self.canvas, self.k
+        c.configure(bg=pick(SUBTLE))
+        item = c.create_text(16 * k, 14 * k, text="What was tried:", anchor="nw", fill=pick(TEXT),
+                             font=(FAMILY, 11, "bold"))
+        for note in notes[:12]:
+            y = c.bbox(item)[3] + 6 * k
+            item = c.create_text(16 * k, y, text="•  " + note, anchor="nw", fill=pick(MUTED), font=(FAMILY, 10),
+                                 width=int(c["width"]) - 32 * k)
 
     def _use_new(self):
-        new = self.proposal
         self.engine.set_practice(False)
-        self.engine.apply_settings(new, save=True)      # saved (and the old settings backed up)
+        self.engine.apply_settings(self.checkup.best, save=True)      # saved (and the old settings backed up)
         self.engine.play_sound("done")
         self.top.destroy()
 
     def _restart(self):
         self.engine.apply_settings(self.original, save=False)
-        self.round = 0
-        self.scores = []
-        self.primary.configure(text="Start", command=self.start_round)
+        self.focus.pack(fill="x", padx=22, pady=(12, 0), before=self.canvas)
+        self.primary.configure(text="Start", command=self.start, state="normal")
         self.secondary.configure(text="Cancel", command=self.close)
-        self.start_round()
+        self.heading.configure(text="Find my best settings")
+        self.text.configure(text="Choose what to practise and press Start.")
 
     def close(self):
         self.engine.set_practice(False)
@@ -2307,8 +2311,9 @@ class PracticeWindow(Child):
         c.configure(bg=pick(self.SCENE))
         cx, cy = w / 2, h / 2
         cam = snap.practice_camera
-        ppd = self.PX_PER_DEG * k
-        step = 10 * ppd
+        kind = self.block.kind if self.block else "turns"
+        ppd = self.PX_PER_DEG[kind] * k
+        step = (5 if kind != "turns" else 10) * ppd
         ox = (-cam[0] * ppd) % step
         oy = (cam[1] * ppd) % step
         grid = pick(self.GRID)
@@ -2324,11 +2329,15 @@ class PracticeWindow(Child):
             tx = cx + (self.cam_start[0] + self.trial.target[0] - cam[0]) * ppd
             ty = cy - (self.cam_start[1] + self.trial.target[1] - cam[1]) * ppd
             on = self.trial._inside
-            r = tuning.RADIUS * ppd
+            r = self.trial.radius * ppd
             if 0 <= tx <= w and 0 <= ty <= h:
                 color = "#22c55e" if on else "#3b82f6"
-                c.create_oval(tx - r * 2.2, ty - r * 2.2, tx + r * 2.2, ty + r * 2.2, outline=color, width=3)
-                c.create_oval(tx - r * 0.7, ty - r * 0.7, tx + r * 0.7, ty + r * 0.7, fill=color, outline="")
+                c.create_oval(tx - r, ty - r, tx + r, ty + r, outline=color, width=3)
+                c.create_oval(tx - 4 * k, ty - 4 * k, tx + 4 * k, ty + 4 * k, fill=color, outline="")
+                if on and self.trial._on_since is not None:   # how long until it counts
+                    share = min(1.0, (self.trial.samples[-1].t - self.trial._on_since) / self.trial.dwell)
+                    c.create_arc(tx - r - 6 * k, ty - r - 6 * k, tx + r + 6 * k, ty + r + 6 * k, start=90,
+                                 extent=-359.9 * share, style="arc", outline="#22c55e", width=4)
             else:  # off screen: arrow at the edge pointing to it
                 ang = math.atan2(ty - cy, tx - cx)
                 ex = cx + math.cos(ang) * (w / 2 - 24 * k)
@@ -2339,6 +2348,10 @@ class PracticeWindow(Child):
                        (ex + math.cos(ang + 2.5) * s, ey + math.sin(ang + 2.5) * s),
                        (ex + math.cos(ang - 2.5) * s, ey + math.sin(ang - 2.5) * s)]
                 c.create_polygon(*[v for p in pts for v in p], fill="#3b82f6", outline="")
+        elif self.playing and self.next_at is not None:
+            left = max(0.0, self.next_at - time.monotonic())
+            c.create_text(cx, cy - 40 * k, text=f"{left:.0f}" if left >= 0.5 else "Go", fill="white",
+                          font=(FAMILY, 28, "bold"))
         a = 14 * k
         c.create_line(cx - a, cy, cx - a / 3, cy, fill="white", width=2)
         c.create_line(cx + a / 3, cy, cx + a, cy, fill="white", width=2)
@@ -2348,6 +2361,13 @@ class PracticeWindow(Child):
             c.create_text(cx, cy + 50 * k, text="Can't see you - face the camera", fill="#f87171",
                           font=(FAMILY, 14, "bold"))
 
+    def _progress(self):
+        if self.checkup is None or self.block is None:
+            return
+        planned = {"all": 9, "aim": 7, "turns": 2}[self.checkup.focus]
+        within = len(self.block.trials) / max(1, len(self.block.targets))
+        self.progress.set(min(0.97, (self.done_blocks + within) / planned))
+
     def poll(self):
         if not self.alive():
             return
@@ -2355,7 +2375,7 @@ class PracticeWindow(Child):
         now = time.monotonic()
         dt = 0.0 if self.last_t is None else now - self.last_t
         self.last_t = now
-        if self.playing:
+        if self.playing and self.block is not None:
             if self.trial is None and self.next_at is not None and now >= self.next_at:
                 self.next_at = None
                 self._next_target(snap)
@@ -2369,9 +2389,10 @@ class PracticeWindow(Child):
                     if self.trial.add(now, rel, (snap.yaw, snap.pitch), (snap.yaw_speed, snap.pitch_speed)):
                         if self.trial.acquired:
                             self.engine.play_sound("target")
-                        self.trials.append(self.trial)
+                        self.block.trials.append(self.trial)
                         self.trial = None
-                        self.next_at = now + 0.5
-            self.progress.set((len(self.trials) + (self.round - 1) * len(self.targets)) / (2 * len(self.targets)))
-        self._draw(snap)
+                        self.next_at = now + 0.4
+            self._progress()
+        if self.checkup is None or self.playing:
+            self._draw(snap)
         self.top.after(16, self.poll)

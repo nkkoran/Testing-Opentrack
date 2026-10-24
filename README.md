@@ -143,22 +143,28 @@ away: try it in the game, tap again if it needs more, or **Undo last change**.
 
 ### Let HeadMouse find the settings: the practice game
 
-**Settings → Feel → Find my best settings (practice game).** Blue targets appear; steer the
-crosshair onto each one with your head, exactly like in the game, and hold it there until it turns
-green. The mouse is not moved and head control doesn't need to be on.
+**Settings → Feel → Find my best settings (practice game).** Steer the crosshair onto each target
+with your head, exactly like in the game, and hold it there until it turns green. The mouse is
+not moved and head control doesn't need to be on. Choose what to practise:
 
-- **Round 1** (12 targets, about a minute) uses your current settings. HeadMouse watches how you
-  reach the targets in each direction: overshooting, creeping up slowly, holding full tilt for a
-  long time, or drifting off the target.
-- **Round 2** tries adjusted settings (small, bounded changes).
-- With **Mouse + joystick** chosen (see below), one target per direction is a small move. Those tune the mouse-like sensitivity (gentler if small moves were jumpy, stronger
-  if you had to turn past the mouse-like area to reach them), and overshooting big turns widens the
-  blend. The dead zones are left alone, because they set the size of the mouse-like area.
-- At the end it shows both times and exactly what changed. **Nothing is kept unless you press
-  "Use the new settings"**, and the old settings are backed up even then. If your settings already
-  suit you, it says so and changes nothing.
+- **Small aiming** (about 3 minutes): small targets a few degrees away, in all directions. Short
+  blocks of 8 targets: first your settings, then a little less and a little more sensitivity,
+  then slow-movement precision switched on (or off). Each block is scored by *throughput*
+  (aiming difficulty handled per second, from where the crosshair actually stopped, so fast but
+  sloppy doesn't win) and by how many targets were hit. The first 2 targets of each block are
+  warm-up. A variation is only kept if it clearly beats the best so far, and the winner is
+  measured once more at the end, so one lucky block can't decide. If most targets are missed, a
+  much calmer setting is tried first. In Joystick mode the slowest speed is varied instead.
+- **Big turns** (about 1 minute): far targets; overshooting, slow approaches and so on suggest an
+  adjustment, which is then tried and kept only if it's faster.
+- **Hold steady** (part of Everything and Small aiming): hold the crosshair still in a circle for 3
+  seconds. If it wobbles, the wobble filter and steadiness go up a little.
+- **Everything** (about 4 minutes) does all three.
 
-Run it again any time, for example after getting used to the new settings.
+Blocks follow each other after a short countdown, so no clicking is needed. At the end HeadMouse
+shows the scores before and after, exactly what would change, and what it tried. **Nothing is kept
+unless you press "Use the new settings"**, and the old settings are backed up even then. Your
+normal feel is always what's measured (Situations are paused during practice).
 
 ### Presets
 
@@ -373,6 +379,7 @@ headmouse/calibration.py      setup-wizard maths
 headmouse/tuning.py           practice game: measures each direction and proposes better settings
 headmouse/quickfix.py         Quick fixes: plain-language problems -> small, bounded setting changes
 headmouse/situations.py       Situations: descriptions and suggested feels (aiming, building, menus)
+headmouse/practice.py         practice check-up: blocks, throughput scoring, trying and confirming variations
 headmouse/gui.py              the window (CustomTkinter): main screen, Settings, setup wizard
 headmouse/opentrack_setup.py  OpenTrack profile copy/patch and launching
 headmouse/winput.py           Windows SendInput / GetAsyncKeyState

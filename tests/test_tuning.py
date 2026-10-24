@@ -2,6 +2,7 @@
 
 import dataclasses
 import math
+import random
 import unittest
 
 from headmouse import config, tuning
@@ -11,7 +12,7 @@ DT = 1 / 125
 
 
 def simulate_round(settings, targets, reaction=0.15, lag=0.12, gain=0.5, anticipate=0.35, reach=(20.0, 13.0),
-                   belief=None, rate=2.5):
+                   belief=None, rate=2.5, make_trial=tuning.Trial, noise=0.0, seed=0):
     """A simple human model: aims the head in proportion to the error, after a reaction delay,
     easing off as the camera swings toward the target (anticipation).
 
@@ -19,6 +20,7 @@ def simulate_round(settings, targets, reaction=0.15, lag=0.12, gain=0.5, anticip
     area reaches, from `belief` = the strength they think it has) are fixed by nudging the
     head by error / belief at `rate` per second, starting from the middle."""
     ctl = MotionController(settings)
+    rng = random.Random(seed)
     a = settings.assist
     hybrid = tuning.hybrid_axes(settings)
     belief = belief or (a.hybrid_gain_x, a.hybrid_gain_y)
@@ -32,7 +34,7 @@ def simulate_round(settings, targets, reaction=0.15, lag=0.12, gain=0.5, anticip
             head = [h + (0 - h) * min(1, DT / lag) for h in head]
             ctl.step(tuple(head), DT)
             t += DT
-        trial = tuning.Trial(target)
+        trial = make_trial(target)
         camera = [0.0, 0.0]
         speed = (0.0, 0.0)
         history = []
@@ -52,14 +54,15 @@ def simulate_round(settings, targets, reaction=0.15, lag=0.12, gain=0.5, anticip
                     want.append(nudge[axis])
                     continue
                 nudge[axis] = None
-                if abs(e) <= tuning.RADIUS * 0.6:
+                if abs(e) <= trial.radius * 0.6:
                     want.append(0.0)
                     continue
                 name = (("right", "left"), ("up", "down"))[axis][0 if e > 0 else 1]
                 angle = min(reach[axis], dz[name] + 0.6 + gain * abs(e))
                 want.append(math.copysign(angle, e))
             head = [h + (w - h) * min(1, DT / lag) for h, w in zip(head, want)]
-            r = ctl.step(tuple(head), DT)
+            seen_head = tuple(h + rng.gauss(0, noise) for h in head) if noise else tuple(head)
+            r = ctl.step(seen_head, DT)
             camera[0] += r.yaw_speed * DT
             camera[1] += r.pitch_speed * DT
             speed = (r.yaw_speed, r.pitch_speed)
