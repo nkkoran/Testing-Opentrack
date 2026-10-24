@@ -199,6 +199,37 @@ sound = true
 
 
 # -----------------------------------------------------------------------------
+#  Click actions (off unless enabled = true): mouse buttons from keys or face
+#  gestures, for when the mouse buttons can't be used. Actions:
+#    "left" / "right" / "middle"  the button is held while the key or gesture is
+#    "left_click" / "right_click" one click
+#    "left_toggle" / "right_toggle" tap to hold the button down, tap to let go
+#    "recenter", "precision" (precision aim on/off), "freeze" (camera on/off)
+#  Keys are only watched, so the game also receives them - choose keys it
+#  doesn't use, or a foot pedal. Gestures need the built-in webcam: the score
+#  (0-1) must reach the threshold for gesture_hold seconds; it lets go a bit
+#  below it. Buttons are only sent while head control is on in the game.
+# -----------------------------------------------------------------------------
+[actions]
+enabled = false
+key1 = ""
+key1_action = ""
+key2 = ""
+key2_action = ""
+key3 = ""
+key3_action = ""
+mouth_action = ""
+mouth_threshold = 0.5
+brows_action = ""
+brows_threshold = 0.5
+smile_action = ""
+smile_threshold = 0.6
+pucker_action = ""
+pucker_threshold = 0.6
+gesture_hold = 0.15
+
+
+# -----------------------------------------------------------------------------
 #  Keys. Use names like "F9", "CAPSLOCK", "PAUSE", "SCROLLLOCK", "NUMPAD0",
 #  "A", "MOUSE4", or "" to switch a key off. Keys are only watched, never
 #  blocked, so the game also receives them - choose keys the game doesn't use.

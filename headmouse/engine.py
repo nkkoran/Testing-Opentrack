@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import config
+from . import actions
 from .config import SITUATION_NAMES, SITUATIONS
 from .keys import key_code
 from .controller import MotionController, StepResult, orient
@@ -81,6 +82,11 @@ class HeadMouse:
         self.precision_on = False   # precision key in toggle mode
         self.situation = None       # "menu", "aim", "build" or None (normal feel)
         self._toggled = {}          # situations switched on with a tap
+        self.actions = actions.Actions()      # click actions from keys and face gestures
+        self.gestures = actions.GestureDetector()
+        self.buttons_down = set()             # mouse buttons HeadMouse is holding down
+        self.action_precision = False         # precision aim / freeze switched on by an action
+        self.action_freeze = False
         self._pointer = False       # the game shows a mouse pointer (steady for POINTER_STABLE_SECONDS)
         self._pointer_seen, self._pointer_since = False, 0.0
         self.settings = None
@@ -105,6 +111,8 @@ class HeadMouse:
             self.controller.drift = list(old.drift)  # keep what auto-center has learned
         self._situation_keys = {name: key_code(getattr(settings.situations, f"{name}_key"))
                                 for name in SITUATIONS}
+        self._bindings = actions.bindings(settings)
+        self._action_keys = {source: key_code(source[4:]) for source, _ in self._bindings if source.startswith("key:")}
         self.monitor = TrackingMonitor(settings.safety)
         self.vk = {name: settings.key(name) for name in KEY_NAMES}
         if settings.tracking.source == "webcam":
@@ -117,6 +125,7 @@ class HeadMouse:
             self.enabled = value
             self.precision_on = False   # always start without precision aim
             self._toggled = {}          # ...and in the normal feel
+            self.action_precision = self.action_freeze = False
             self._events.append(Event("enabled", "Head control ON") if value
                                 else Event("disabled", "Head control OFF"))
 
@@ -128,6 +137,38 @@ class HeadMouse:
         self.controller.recentered()  # the head didn't move, so the camera mustn't either
         self._events.append(Event("recentered", f"Re-centered (yaw {self.offset[0]:+.1f}, "
                                                 f"pitch {self.offset[1]:+.1f})", self.offset))
+
+    def _update_actions(self, now, dt, focused, face):
+        """Mouse buttons and commands from the click-action keys and face gestures."""
+        a = self.settings.actions
+        held = {source: self.keys.held(vk) for source, vk in self._action_keys.items()}
+        for gesture in self.gestures.update(face, now, dt, actions.thresholds(self.settings), a.gesture_hold):
+            held[f"face:{gesture}"] = True
+        out = self.actions.update(self._bindings, held, now)
+        if not (self.enabled and focused is not False and not self.practice and not self.holds):
+            self.actions.reset()     # only in the game with head control on: never click elsewhere
+            out = actions.Output(set(), [])
+        for command in out.commands:
+            if command == "recenter":
+                self.recenter()
+            elif command == "precision":
+                self.action_precision = not self.action_precision
+                self._events.append(Event("precision_on" if self.action_precision else "precision_off",
+                                          "Precision aim " + ("ON" if self.action_precision else "OFF")))
+            elif command == "freeze":
+                self.action_freeze = not self.action_freeze
+                self._events.append(Event("pause", "Camera frozen" if self.action_freeze else "Camera free"))
+        self.set_buttons(out.buttons)
+
+    def set_buttons(self, wanted):
+        """Press and release mouse buttons so exactly `wanted` are down."""
+        if not self.send:
+            wanted = set()
+        for button in sorted(self.buttons_down - wanted):
+            self.backend.send_button(button, False)
+        for button in sorted(wanted - self.buttons_down):
+            self.backend.send_button(button, True)
+        self.buttons_down = set(wanted)
 
     def _pointer_steady(self, now):
         """Pointer shown/hidden, ignoring flickers (loading screens, the moment between menus)."""
@@ -209,6 +250,9 @@ class HeadMouse:
         self.raw_angles = orient(raw, self.settings) if raw is not None else None
         self.eye_pitch = sample.eye_pitch if raw is not None else None
         blink = sample.blink if raw is not None else 0.0
+        self._update_actions(now, dt, focused, sample.face if raw is not None else None)
+        precision = precision or self.action_precision
+        paused = paused or self.action_freeze
         if self.tracking != self._reported_tracking:
             if self.tracking == TrackingStatus.OK:
                 self._events.append(Event("tracking_ok", "Tracking OK"))
@@ -285,7 +329,7 @@ class _NoSource:
 def make_source(settings, base_dir):
     if settings.tracking.source == "webcam":
         from .webcam import WebcamSource
-        return WebcamSource(settings.webcam, base_dir, eyes=uses_eyes(settings))
+        return WebcamSource(settings.webcam, base_dir, eyes=needs_face(settings))
     return OpenTrackUDPSource(settings.opentrack.listen_address, settings.opentrack.port)
 
 
@@ -294,10 +338,15 @@ def uses_eyes(settings):
     return settings.glance.enabled and settings.glance.eye_check
 
 
+def needs_face(settings):
+    """True when the webcam must read the face's expressions (eyes for glances, or gestures)."""
+    return uses_eyes(settings) or actions.uses_gestures(settings)
+
+
 def _restart_needed(old, new):
     if old.tracking.source != new.tracking.source:
         return True
-    if new.tracking.source == "webcam" and uses_eyes(old) != uses_eyes(new):
+    if new.tracking.source == "webcam" and needs_face(old) != needs_face(new):
         return True
     if new.tracking.source == "opentrack":
         return (old.opentrack.listen_address, old.opentrack.port) != \
@@ -331,6 +380,9 @@ class Snapshot:
     rate: float = 0.0
     practice_camera: tuple = (0.0, 0.0)
     situation: str = None
+    face: dict = None              # smoothed face gesture scores (click actions)
+    gestures: tuple = ()           # gestures active now
+    buttons: tuple = ()            # mouse buttons HeadMouse holds down now
     dry_run: bool = False
     settings: object = None
 
@@ -409,6 +461,8 @@ class Engine:
         self._running = False
         if self._thread is not None:
             self._thread.join(timeout=2.0)
+        if self.app is not None:
+            self.app.set_buttons(set())   # never leave a mouse button held down
         if self.source is not None:
             self.source.stop()
 
@@ -641,6 +695,8 @@ class Engine:
             test_turn_active=self._turn_remaining > 0, dry_run=self.dry_run,
             glancing=r.glancing, gaze=r.gaze, eye_pitch=app.eye_pitch, rate=self.rate,
             practice_camera=tuple(app.practice_camera), situation=app.situation,
+            face=dict(app.gestures.level), gestures=tuple(sorted(app.gestures.active)),
+            buttons=tuple(sorted(app.buttons_down)),
             settings=self.settings)
         with self._lock:
             self._snapshot = snap

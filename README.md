@@ -103,11 +103,12 @@ stopped), short high tone = tracking back.
 | Settings | Everything else (below) |
 | Camera / Stay on top | Small switches at the bottom: a floating camera preview, and keeping HeadMouse above the game |
 
-**Settings** has five tabs. Changes are tried out immediately; **Save** keeps them and **Undo
+**Settings** has six tabs. Changes are tried out immediately; **Save** keeps them and **Undo
 changes** goes back.
 - **Feel:** choose **Left & right** or **Up & down**, how the head moves the camera there, and
   the settings for that, while watching the graph.
 - **Situations:** a different feel while aiming, building or in menus (below).
+- **Clicks:** mouse buttons from a key, a foot pedal or a face gesture (below).
 - **Tracking:** webcam or OpenTrack, camera choice, the setup wizard, and the OpenTrack profile
   helper.
 - **Game:** calibration for the game, and auto-on in the game window. Head control is paused while
@@ -280,6 +281,31 @@ Situations** has one card for each:
   (can be switched off), and the main window shows which feel is in use. Turning head control off
   and on goes back to the normal feel.
 
+### Clicking without the mouse: keys, a foot pedal or face gestures
+
+**Settings → Clicks**, off until **Use click actions** is switched on. For playing with one hand on
+the keyboard:
+
+- **Keys or a foot pedal** (up to three): the key acts as a mouse button. The game still receives
+  the key, so choose one it doesn't use, or a foot pedal.
+- **Face gestures** (built-in webcam): **open mouth**, **raise eyebrows**, **smile**, **pucker
+  lips**, in the style of Google's Project Gameface. Each has a live bar showing how strongly
+  the webcam sees it, and a **Counts from** slider. Make the gesture a few times and set the
+  slider a little below your usual peak, high enough that talking doesn't reach it. A gesture
+  must be held for **Hold the gesture for** (0.15 s) before it counts, and it lets go a little
+  below the slider, so it doesn't flicker.
+- **What each can do:**
+  - hold the left, right or middle button while held (e.g. open mouth = hold right button to
+    aim a bow),
+  - a single left or right click,
+  - left or right button on/off (tap to hold it down, tap again to let go),
+  - re-center, precision aim on/off, or freeze the camera on/off.
+- **Safety:** buttons are only pressed while head control is on and the game window is in front,
+  never during the practice game, and every button is let go when head control turns off or
+  HeadMouse closes. The window shows which buttons HeadMouse is holding.
+- A held right button also counts as the aiming key for **Situations**, so "open mouth to aim"
+  can switch to the aiming feel too.
+
 ### Glancing away (e.g. at the keyboard): optional
 
 **Off unless you switch it on**, under **Settings → Feel → Glancing away → "Pause the camera when
@@ -380,6 +406,7 @@ headmouse/tuning.py           practice game: measures each direction and propose
 headmouse/quickfix.py         Quick fixes: plain-language problems -> small, bounded setting changes
 headmouse/situations.py       Situations: descriptions and suggested feels (aiming, building, menus)
 headmouse/practice.py         practice check-up: blocks, throughput scoring, trying and confirming variations
+headmouse/actions.py          click actions: gestures (smoothing, threshold, hold) and key/gesture -> buttons
 headmouse/gui.py              the window (CustomTkinter): main screen, Settings, setup wizard
 headmouse/opentrack_setup.py  OpenTrack profile copy/patch and launching
 headmouse/winput.py           Windows SendInput / GetAsyncKeyState

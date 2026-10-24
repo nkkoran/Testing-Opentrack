@@ -198,6 +198,27 @@ class SituationSettings:
 
 
 @dataclass
+class ActionSettings:
+    """Mouse buttons from keys or face gestures (for a player who can't use the mouse buttons)."""
+    enabled: bool = False
+    key1: str = ""               # a key (or foot pedal)...
+    key1_action: str = ""        # ...and what it does: see actions.ACTIONS
+    key2: str = ""
+    key2_action: str = ""
+    key3: str = ""
+    key3_action: str = ""
+    mouth_action: str = ""       # face gestures (built-in webcam): open mouth...
+    mouth_threshold: float = 0.5
+    brows_action: str = ""       # ...raise eyebrows...
+    brows_threshold: float = 0.5
+    smile_action: str = ""       # ...smile...
+    smile_threshold: float = 0.6
+    pucker_action: str = ""      # ...pucker lips
+    pucker_threshold: float = 0.6
+    gesture_hold: float = 0.15   # seconds a gesture must be held before it counts
+
+
+@dataclass
 class Settings:
     tracking: TrackingSettings = field(default_factory=TrackingSettings)
     webcam: WebcamSettings = field(default_factory=WebcamSettings)
@@ -215,6 +236,7 @@ class Settings:
     glance: GlanceSettings = field(default_factory=GlanceSettings)
     assist: AssistSettings = field(default_factory=AssistSettings)
     situations: SituationSettings = field(default_factory=SituationSettings)
+    actions: ActionSettings = field(default_factory=ActionSettings)
 
     def source_settings(self):
         """The [webcam] or [opentrack] section for the tracker in use."""
@@ -401,6 +423,20 @@ def validate(s):
             key_code(getattr(s.situations, f"{name}_key"))
         except ValueError as e:
             raise SettingsError(f"[situations] {name}_key: {e}") from None
+    from .actions import ACTIONS, GESTURES
+    act = s.actions
+    for i in (1, 2, 3):
+        try:
+            key_code(getattr(act, f"key{i}"))
+        except ValueError as e:
+            raise SettingsError(f"[actions] key{i}: {e}") from None
+        _check(getattr(act, f"key{i}_action") in ACTIONS, f"[actions] key{i}_action must be one of: "
+               + ", ".join(repr(k) for k in ACTIONS))
+    for g in GESTURES:
+        _check(getattr(act, f"{g}_action") in ACTIONS, f"[actions] {g}_action must be one of: "
+               + ", ".join(repr(k) for k in ACTIONS))
+        _check(0.05 <= getattr(act, f"{g}_threshold") <= 1, f"[actions] {g}_threshold must be 0.05-1")
+    _check(0 <= act.gesture_hold <= 1, "[actions] gesture_hold must be 0-1 seconds")
     _check(0 <= a.hybrid_blend <= 10 and 0 <= a.hybrid_blend_y <= 10,
            "[assist] hybrid_blend and hybrid_blend_y must be 0-10 degrees")
     _check(0 <= a.mouse_delay_x <= 2 and 0 <= a.mouse_delay_y <= 2,

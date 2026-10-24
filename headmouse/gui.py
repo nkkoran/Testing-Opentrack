@@ -16,7 +16,7 @@ from tkinter import messagebox
 
 import customtkinter as ctk
 
-from . import calibration, config, opentrack_setup, practice, quickfix, situations, updates
+from . import actions, calibration, config, opentrack_setup, practice, quickfix, situations, updates
 from .curves import DirectionCurve
 from .engine import Engine, uses_eyes
 from .keys import name_from_tk_keysym
@@ -703,11 +703,12 @@ class SettingsWindow(Child):
                                    segmented_button_selected_color=PILL, segmented_button_selected_hover_color=PILL,
                                    text_color=TEXT)
         self.tabs.pack(fill="both", expand=True, padx=18, pady=(12, 0))
-        for name in ("Feel", "Situations", "Tracking", "Game", "Keys & sound"):
+        for name in ("Feel", "Situations", "Clicks", "Tracking", "Game", "Keys & sound"):
             self.tabs.add(name)
         self.tabs._segmented_button.configure(font=font(13, "bold"), height=36)
         self._feel_tab(self.tabs.tab("Feel"))
         self._situations_tab(self.tabs.tab("Situations"))
+        self._clicks_tab(self.tabs.tab("Clicks"))
         self._tracking_tab(self.tabs.tab("Tracking"))
         self._game_tab(self.tabs.tab("Game"))
         self._keys_tab(self.tabs.tab("Keys & sound"))
@@ -1401,6 +1402,117 @@ class SettingsWindow(Child):
         self.top.unbind("<KeyPress>")
         self.top.unbind("<ButtonPress>")
 
+    # --- Clicks ---------------------------------------------------------------
+
+    def _clicks_tab(self, tab):
+        a = self.work.actions
+        scroll = scroll_frame(tab)
+        scroll.pack(fill="both", expand=True)
+        ctk.CTkLabel(scroll, text="Click without the mouse", font=font(16, "bold"), text_color=TEXT,
+                     anchor="w").pack(fill="x")
+        ctk.CTkLabel(scroll, text="Let a key, a foot pedal or a face gesture press the mouse buttons - e.g. open "
+                                  "your mouth to hold the right button while you aim, or tap a key to attack. "
+                                  "Buttons are only pressed while head control is on and the game is in front.",
+                     font=font(12), text_color=MUTED, wraplength=470, justify="left", anchor="w").pack(fill="x")
+        self.actions_switch = switch(scroll, "Use click actions", lambda: self._set(
+            "actions", enabled=bool(self.actions_switch.get())), font=font(14, "bold"), text_color=TEXT)
+        if a.enabled:
+            self.actions_switch.select()
+        self.actions_switch.pack(anchor="w", pady=(10, 0))
+        self.actions_now = ctk.CTkLabel(scroll, text="", font=font(12, "bold"), text_color=TEXT, anchor="w")
+        self.actions_now.pack(fill="x", pady=(4, 0))
+        labels = list(actions.ACTIONS.values())
+        to_key = {v: k for k, v in actions.ACTIONS.items()}
+
+        box = ctk.CTkFrame(scroll, fg_color=SUBTLE, corner_radius=14)
+        box.pack(fill="x", pady=(12, 0))
+        ctk.CTkLabel(box, text="Keys or a foot pedal", font=font(15, "bold"), text_color=TEXT, anchor="w").pack(
+            fill="x", padx=14, pady=(12, 0))
+        ctk.CTkLabel(box, text="The game still gets the key too, so choose keys it doesn't use (or a pedal).",
+                     font=font(11), text_color=MUTED, wraplength=440, justify="left", anchor="w").pack(fill="x", padx=14)
+        self.action_keys = {}
+        for i in (1, 2, 3):
+            row = ctk.CTkFrame(box, fg_color="transparent")
+            row.pack(fill="x", padx=14, pady=(8, 0))
+            b = ctk.CTkButton(row, text=getattr(a, f"key{i}") or "choose key", width=120, height=32, corner_radius=8,
+                              font=font(13, "bold"), command=lambda i=i: self._capture_action_key(i), **self.KEYCAP)
+            b.pack(side="left")
+            menu = dropdown(row, labels, command=lambda v, i=i: self._set("actions", **{f"key{i}_action": to_key[v]}),
+                            height=32)
+            menu.set(actions.ACTIONS[getattr(a, f"key{i}_action")])
+            menu.pack(side="left", fill="x", expand=True, padx=(8, 0))
+            self.action_keys[i] = b
+        ctk.CTkFrame(box, height=10, fg_color="transparent").pack()
+
+        box = ctk.CTkFrame(scroll, fg_color=SUBTLE, corner_radius=14)
+        box.pack(fill="x", pady=(12, 0))
+        ctk.CTkLabel(box, text="Face gestures (built-in webcam)", font=font(15, "bold"), text_color=TEXT,
+                     anchor="w").pack(fill="x", padx=14, pady=(12, 0))
+        ctk.CTkLabel(box, text="The bar shows how strongly each gesture is seen right now; the slider is how far "
+                               "it must go to count. Make the gesture a few times and set the slider a little "
+                               "below your usual peak - high enough that talking doesn't reach it.",
+                     font=font(11), text_color=MUTED, wraplength=440, justify="left", anchor="w").pack(fill="x", padx=14)
+        self.gesture_meters = {}
+        for g, name in actions.GESTURES.items():
+            row = ctk.CTkFrame(box, fg_color="transparent")
+            row.pack(fill="x", padx=14, pady=(10, 0))
+            ctk.CTkLabel(row, text=name, font=font(13, "bold"), text_color=TEXT, width=120, anchor="w").pack(side="left")
+            menu = dropdown(row, labels, command=lambda v, g=g: self._set("actions", **{f"{g}_action": to_key[v]}),
+                            height=30)
+            menu.set(actions.ACTIONS[getattr(a, f"{g}_action")])
+            menu.pack(side="left", fill="x", expand=True)
+            meter = ctk.CTkProgressBar(box, height=10, progress_color=ACCENT, fg_color=TRACK)
+            meter.pack(fill="x", padx=14, pady=(6, 0))
+            meter.set(0)
+            threshold = SliderRow(box, "Counts from", 0.05, 1.0, 0.05, lambda v: f"{v * 100:.0f}%",
+                                  lambda v, g=g: self._set("actions", **{f"{g}_threshold": round(v, 2)}))
+            threshold.frame.pack(fill="x", padx=14, pady=(2, 0))
+            threshold.set(getattr(a, f"{g}_threshold"))
+            self.gesture_meters[g] = meter
+        self.hold_row = SliderRow(box, "Hold the gesture for", 0, 0.6, 0.05, lambda v: f"{v:.2f} s",
+                                  lambda v: self._set("actions", gesture_hold=round(v, 2)),
+                                  "Shorter reacts sooner; longer ignores quick expressions like talking")
+        self.hold_row.frame.pack(fill="x", padx=14, pady=(12, 0))
+        self.hold_row.set(a.gesture_hold)
+        ctk.CTkFrame(box, height=12, fg_color="transparent").pack()
+
+    def _capture_action_key(self, i):
+        self._capturing_action = i
+        self.action_keys[i].configure(text="Press a key...", **self.KEYCAP_ACTIVE)
+        self.top.bind("<KeyPress>", self._action_key)
+        self.top.focus_force()
+
+    def _action_key(self, event):
+        i = getattr(self, "_capturing_action", None)
+        if i is None:
+            return
+        if event.keysym == "Escape":
+            key = getattr(self.work.actions, f"key{i}")
+        elif event.keysym in ("Delete", "BackSpace"):
+            key = ""
+        else:
+            key = name_from_tk_keysym(event.keysym)
+            if key is None:
+                self.saved_label.configure(text=f"'{event.keysym}' can't be used - try another key")
+                return
+            if any(getattr(self.work.keys, f.name) == key for f in dataclasses.fields(config.KeySettings)):
+                self.saved_label.configure(text=f"{key} is one of HeadMouse's own keys - choose another")
+                return
+        self._set("actions", **{f"key{i}": key})
+        self.action_keys[i].configure(text=key or "choose key", **self.KEYCAP)
+        self._capturing_action = None
+        self.top.unbind("<KeyPress>")
+
+    def _show_clicks(self, snap):
+        face = snap.face or {}
+        for g, meter in self.gesture_meters.items():
+            meter.set(min(1.0, face.get(g, 0.0)))
+            meter.configure(progress_color=STATE_COLORS["ACTIVE"] if g in snap.gestures else ACCENT)
+        held = ", ".join(snap.buttons) or "none"
+        seen = ", ".join(actions.GESTURES[g].lower() for g in snap.gestures) or "none"
+        note = "" if face or not self.work.actions.enabled else "  ·  (gestures need the built-in webcam)"
+        self.actions_now.configure(text=f"Mouse buttons held: {held}  ·  gestures: {seen}{note}")
+
     # --- Tracking ------------------------------------------------------------
 
     def _tracking_tab(self, tab):
@@ -1685,6 +1797,8 @@ class SettingsWindow(Child):
         snap = self.engine.snapshot()
         if self.tabs.get() == "Feel":
             self._plot(snap)
+        if self.tabs.get() == "Clicks":
+            self._show_clicks(snap)
         if self.tabs.get() == "Situations":
             now = config.SITUATION_NAMES[snap.situation] if snap.situation else "normal feel"
             pointer = ""

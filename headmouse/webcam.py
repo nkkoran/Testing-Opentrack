@@ -16,6 +16,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+from .actions import face_scores
 from .filters import OneEuroFilter
 from .tracking import HeadSample
 
@@ -241,10 +242,11 @@ class WebcamSource:
         pitch = self._pitch_filter(pitch, now)
         values = (float(m[0][3]), float(m[1][3]), float(m[2][3]), yaw, pitch, roll)
         eye_pitch, blink = eye_signals(result.face_blendshapes[0]) if result.face_blendshapes else (None, 0.0)
+        face = face_scores(result.face_blendshapes[0]) if result.face_blendshapes else None
         with self._lock:
             self._sequence += 1
             self._latest = HeadSample(yaw=yaw, pitch=pitch, values=values, received_at=now,
-                                      sequence=self._sequence, eye_pitch=eye_pitch, blink=blink)
+                                      sequence=self._sequence, eye_pitch=eye_pitch, blink=blink, face=face)
         self.packets += 1
 
     def _make_preview(self, cv2, frame, result):

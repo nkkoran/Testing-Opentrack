@@ -13,6 +13,7 @@ import sys
 INPUT_MOUSE = 0
 MOUSEEVENTF_MOVE = 0x0001
 MOUSEEVENTF_MOVE_NOCOALESCE = 0x2000
+BUTTON_FLAGS = {"left": (0x0002, 0x0004), "right": (0x0008, 0x0010), "middle": (0x0020, 0x0040)}  # (down, up)
 
 # Fixed-width field types so the structure layout matches Windows on 64-bit and
 # 32-bit Python (ctypes.wintypes.LONG would be 8 bytes on Linux, which breaks the
@@ -86,6 +87,17 @@ class WindowsInput:
             # report failure, so this only catches other errors.
             self.failed_sends += 1
 
+    def send_button(self, button, down):
+        """Press or release a mouse button ("left", "right", "middle")."""
+        mi = self._input.u.mi
+        mi.dx = mi.dy = 0
+        mi.mouseData = 0
+        mi.dwFlags = BUTTON_FLAGS[button][0 if down else 1]
+        mi.time = 0
+        mi.dwExtraInfo = 0
+        if self._user32.SendInput(1, ctypes.byref(self._input), ctypes.sizeof(INPUT)) != 1:
+            self.failed_sends += 1
+
     def is_key_down(self, vk):
         return vk is not None and bool(self._user32.GetAsyncKeyState(vk) & 0x8000)
 
@@ -124,10 +136,14 @@ class NullInput:
         self.keys_down = set()
         self.window_title = ""
         self.pointer = False
+        self.buttons = []           # (button, down) in the order they were sent
         self.failed_sends = 0
 
     def send_relative(self, dx, dy):
         self.sent.append((int(dx), int(dy)))
+
+    def send_button(self, button, down):
+        self.buttons.append((button, down))
 
     def is_key_down(self, vk):
         return vk is not None and vk in self.keys_down
